@@ -1277,6 +1277,7 @@ def test():
     # series = Series(np.arange(10), name=0)
     # out = test_edit(series)
     # assert_series_equal(series, out)
+
     df1 = DataFrame(np.random.rand(1000, 20), columns=range(0, 20))
     df1 = df1.join([DataFrame(np.random.rand(1000, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
     out = test_edit(df1)
