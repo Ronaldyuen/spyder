@@ -79,6 +79,116 @@ BACKGROUND_INDEX_ALPHA = 0.8
 BACKGROUND_STRING_ALPHA = 0.05
 BACKGROUND_MISC_ALPHA = 0.3
 
+from qtpy.QtWidgets import QHeaderView
+# signal = pyqtSignal
+from qtpy.QtCore import Signal, Qt
+
+
+class FilterHeader(QHeaderView):
+    filterActivated = Signal()
+
+    def __init__(self, parent):
+        super().__init__(Qt.Horizontal, parent)
+        self._editors = []
+        self._padding = 4
+        # the last visible section in the header takes up all the available space
+        self.setStretchLastSection(True)
+        # OLD: self.setResizeMode(QtGui.QHeaderView.Stretch)
+        # self.setSectionResizeMode(QHeaderView.Stretch)
+        self.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.setSortIndicatorShown(False)
+        # when section is resized, this signal is emitted
+        self.sectionResized.connect(self.adjustPositions)
+        parent.horizontalScrollBar().valueChanged.connect(self.adjustPositions)
+
+    def setFilterBoxes(self, count):
+        while self._editors:
+            # clear all editors
+            # remove editor list last element
+            editor = self._editors.pop()
+            editor.deleteLater()
+        for index in range(count):
+            editor = QLineEdit(self.parent())
+            editor.setPlaceholderText(str(index))
+            editor.returnPressed.connect(self.filterActivated.emit)
+            self._editors.append(editor)
+        self.adjustPositions()
+
+    # This property holds the recommended size
+    def sizeHint(self):
+        size = super().sizeHint()
+        if self._editors:
+            height = self._editors[0].sizeHint().height()
+            size.setHeight(size.height() + height + self._padding)
+        return size
+
+    # Updates the geometry of the child widgets of the view.
+    # called when sizeHint etc. is called
+    def updateGeometries(self):
+        if self._editors:
+            height = self._editors[0].sizeHint().height()
+            # set margin (add space for lineedit to insert there), last parameter is bottom margin
+            self.setViewportMargins(0, 0, 0, height + self._padding)
+        else:
+            self.setViewportMargins(0, 0, 0, 0)
+        super().updateGeometries()
+        self.adjustPositions()
+
+    # connected with sectionResized and horizontalScrollBar
+    def adjustPositions(self):
+        for index, editor in enumerate(self._editors):
+            height = editor.sizeHint().height()
+            # maybe this +2 is not needed?
+            # x = self.sectionPosition(index) - self.offset() + 2
+            # sectionPosition: first visible item's top-left corner to the top-left corner of the item with logicalIndex.
+            # sectionPosition = 0 in default position
+            # offset: header's left most visible pixel position
+            x = self.sectionPosition(index) - self.offset()
+            y = height + (self._padding // 2)
+            # y = 1
+            # move to x,y position
+            # not moved to correct position if sudden move, maybe should not connect directly to hscroll
+            editor.move(x, y)
+            editor.resize(self.sectionSize(index), height)
+
+    def filterText(self, index):
+        if 0 <= index < len(self._editors):
+            return self._editors[index].text()
+        return ''
+
+    def setFilterText(self, index, text):
+        if 0 <= index < len(self._editors):
+            self._editors[index].setText(text)
+
+    def clearFilters(self):
+        for editor in self._editors:
+            editor.clear()
+
+
+from qtpy.QtWidgets import QHeaderView, QAction
+
+
+class Header(QHeaderView):
+    def __init__(self, parent=None):
+        super(Header, self).__init__(Qt.Horizontal, parent)
+
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.ctxMenu)
+        self.hello = QAction("Hello", self)
+        self.hello.triggered.connect(self.printHello)
+        self.currentSection = None
+
+    def printHello(self):
+        data = self.model().headerData(self.currentSection, Qt.Horizontal)
+        print(data.toString())
+
+    def ctxMenu(self, point):
+        menu = QMenu(self)
+        self.currentSection = self.logicalIndexAt(point)
+        menu.addAction(self.hello)
+        menu.exec_(self.mapToGlobal(point))
+
+
 
 def bool_false_check(value):
     """
@@ -112,6 +222,7 @@ class DataFrameModel(QAbstractTableModel):
         QAbstractTableModel.__init__(self)
         self.dialog = parent
         self.df = dataFrame
+        self.original_df = None
         self.df_index = dataFrame.index.tolist()
         self.df_header = dataFrame.columns.tolist()
         self._format = format
@@ -254,6 +365,18 @@ class DataFrameModel(QAbstractTableModel):
             self.return_max = global_max
         self.reset()
 
+    def set_filter(self):
+        # init original df
+        if self.original_df is None:
+            self.original_df = self.df
+        # use @ for variables in environment
+        text = "A > 1"
+        self.df = self.original_df.query(text).copy()
+        # reset total rows
+        self.total_rows = self.df.shape[0]
+        self.reset()
+
+    # this is the Qmodelindex http://doc.qt.io/qt-5/qmodelindex.html
     def get_bgcolor(self, index):
         """Background color depending on value."""
         column = index.column()
@@ -471,6 +594,7 @@ class DataFrameView(QTableView):
         self.setVerticalScrollMode(1)
 
         self.sort_old = [None]
+        #  header_class is headerview. horizontalHeader()
         self.header_class = header
         self.header_class.sectionClicked.connect(self.sortByColumn)
         self.menu = self.setup_menu()
@@ -837,6 +961,7 @@ class DataFrameEditor(QDialog):
 
         # Create the model and view of the data
         self.dataModel = DataFrameModel(data, parent=self)
+        # data frame view
         self.create_data_table()
 
         self.layout.addWidget(self.hscroll, 2, 0, 1, 2)
@@ -878,6 +1003,15 @@ class DataFrameEditor(QDialog):
         self.bgcolor_global.stateChanged.connect(self.dataModel.colum_avg)
         btn_layout.addWidget(self.bgcolor_global)
 
+        # testing
+        self.bgcolor_global = QCheckBox(_('Test'))
+        self.bgcolor_global.stateChanged.connect(self.set_filter)
+        btn_layout.addWidget(self.bgcolor_global)
+
+        self.textbox = QLineEdit()
+        btn_layout.addWidget(self.textbox)
+        self.textbox.returnPressed.connect(self.textbox_return)
+
         btn_layout.addStretch()
         bbox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bbox.accepted.connect(self.accept)
@@ -910,17 +1044,38 @@ class DataFrameEditor(QDialog):
     def create_table_header(self):
         """Create the QTableView that will hold the header model."""
         self.table_header = QTableView()
-        self.table_header.verticalHeader().hide()
-        self.table_header.setEditTriggers(QTableWidget.NoEditTriggers)
+        # set here as custom_header_view uses scrollbar in table_header
         self.table_header.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.table_header.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.table_header.setHorizontalScrollMode(QTableView.ScrollPerPixel)
         self.table_header.setHorizontalScrollBar(self.hscroll)
+        # original (default)
+        # would cause funny behaviour if calling QheaderView and self.table_header.horizontalHeader at the same time
+        # custom_header_view = QHeaderView(Qt.Horizontal,self.table_header)
+        self.custom_header_view = FilterHeader(self.table_header)
+        # custom_header_view = self.table_header.horizontalHeader()
+        # needs to set cliackable manually,  not sure what else needs to self manually when creating qheaderview class
+        # maybe check value of each field?
+        # https://github.com/spyder-ide/qtpy/blob/master/qtpy/tests/test_patch_qheaderview.py
+        # probably need to set "setSectionsMovable, setSectionsMovable, setSectionResizeMode
+        self.custom_header_view.setSectionsClickable(True)
+        self.table_header.setHorizontalHeader(self.custom_header_view)
+        # self.table_header.setHorizontalHeader(self.custom_header_)
+        self.table_header.verticalHeader().hide()
+        self.table_header.setEditTriggers(QTableWidget.NoEditTriggers)
+
+        self.table_header.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
         self.table_header.setFrameStyle(QFrame.Plain)
         self.table_header.horizontalHeader().sectionResized.connect(
-                                                        self._column_resized)
+            self._column_resized)
         self.table_header.setItemDelegate(QItemDelegate())
         self.layout.addWidget(self.table_header, 0, 1)
+
+        # # qheaderview
+        # self.custom_header_.setDefaultAlignment(Qt.AlignLeft)
+        #
+        # self.custom_header_view.setFilterBoxes(15)
+
 
     def create_table_index(self):
         """Create the QTableView that will hold the index model."""
@@ -988,6 +1143,7 @@ class DataFrameEditor(QDialog):
         self.table_header.setRowHeight(row, new_height)
         self._update_layout()
 
+    # the width and height reset here
     def _update_layout(self):
         """Set the width and height of the QTableViews and hide rows."""
         h_width = max(self.table_level.verticalHeader().sizeHint().width(),
@@ -995,16 +1151,21 @@ class DataFrameEditor(QDialog):
         self.table_level.verticalHeader().setFixedWidth(h_width)
         self.table_index.verticalHeader().setFixedWidth(h_width)
 
+        # self._model.header_shape = number of levels in header and index, last_row is 0 in a normal dataframe
         last_row = self._model.header_shape[0] - 1
+        _editor_height = self.custom_header_view._editors[
+            0].sizeHint().height() if self.custom_header_view._editors else 0
         if last_row < 0:
             hdr_height = self.table_level.horizontalHeader().height()
         else:
             hdr_height = self.table_level.rowViewportPosition(last_row) + \
                          self.table_level.rowHeight(last_row) + \
-                         self.table_level.horizontalHeader().height()
+                         self.table_level.horizontalHeader().height() + \
+                         _editor_height
             # Check if the header shape has only one row (which display the
             # same info than the horizontal header).
             if last_row == 0:
+                # not sure what this does
                 self.table_level.setRowHidden(0, True)
                 self.table_header.setRowHidden(0, True)
         self.table_header.setFixedHeight(hdr_height)
@@ -1057,6 +1218,10 @@ class DataFrameEditor(QDialog):
         if relayout:
             self._update_layout()
 
+        # after set model, set filter box
+        self.custom_header_view.setFilterBoxes(self._model.shape[1])
+
+
     def setCurrentIndex(self, y, x):
         """Set current selection."""
         self.dataTable.selectionModel().setCurrentIndex(
@@ -1103,11 +1268,29 @@ class DataFrameEditor(QDialog):
         for col in range(max_col):
             self._resizeColumnToContents(header, data, col, max_col_ms)
 
+            # resize event handled here
+
     def eventFilter(self, obj, event):
+        if event.type() == QEvent.KeyPress:
+            pass
         """Override eventFilter to catch resize event."""
         if obj == self.dataTable and event.type() == QEvent.Resize:
             self._resizeVisibleColumnsToContents()
+
         return False
+
+    def keyPressEvent(self, event):
+        """Capture and ignore all key press events.
+
+        This is used so that return key event does not trigger the exit button
+        from the dialog. We need to allow the return key to be used in filters
+        in the widget."""
+
+        # suspress enter key
+        if event.key() == Qt.Key_Enter:
+            pass
+        else:
+            super(DataFrameEditor, self).keyPressEvent(event)
 
     def _resizeVisibleColumnsToContents(self):
         """Resize the columns that are in the view."""
@@ -1228,6 +1411,12 @@ class DataFrameEditor(QDialog):
         self._update_header_size()
         QApplication.restoreOverrideCursor()
 
+    def set_filter(self):
+        self.dataModel.set_filter()
+        self.setModel(self.dataTable.model())
+
+    def textbox_return(self):
+        print(self.textbox.text())
 
 #==============================================================================
 # Tests
