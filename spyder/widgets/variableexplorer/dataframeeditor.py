@@ -69,11 +69,11 @@ ROWS_TO_LOAD = 500
 COLS_TO_LOAD = 40
 
 # Background colours
-BACKGROUND_NUMBER_MINHUE = 0.66 # hue for largest number
-BACKGROUND_NUMBER_HUERANGE = 0.33 # (hue for smallest) minus (hue for largest)
+BACKGROUND_NUMBER_MINHUE = 0.66  # hue for largest number
+BACKGROUND_NUMBER_HUERANGE = 0.33  # (hue for smallest) minus (hue for largest)
 BACKGROUND_NUMBER_SATURATION = 0.7
 BACKGROUND_NUMBER_VALUE = 1.0
-BACKGROUND_NUMBER_ALPHA = 0.6 
+BACKGROUND_NUMBER_ALPHA = 0.6
 BACKGROUND_NONNUMBER_COLOR = Qt.lightGray
 BACKGROUND_INDEX_ALPHA = 0.8
 BACKGROUND_STRING_ALPHA = 0.05
@@ -92,26 +92,28 @@ class FilterHeader(QHeaderView):
         self._editors = []
         self._padding = 4
         # the last visible section in the header takes up all the available space
-        self.setStretchLastSection(True)
+        # self.setStretchLastSection(True)
         # OLD: self.setResizeMode(QtGui.QHeaderView.Stretch)
         # self.setSectionResizeMode(QHeaderView.Stretch)
-        self.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        # self.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.setSortIndicatorShown(False)
         # when section is resized, this signal is emitted
         self.sectionResized.connect(self.adjustPositions)
         parent.horizontalScrollBar().valueChanged.connect(self.adjustPositions)
 
     def setFilterBoxes(self, count):
-        while self._editors:
-            # clear all editors
-            # remove editor list last element
-            editor = self._editors.pop()
-            editor.deleteLater()
-        for index in range(count):
-            editor = QLineEdit(self.parent())
-            editor.setPlaceholderText(str(index))
-            editor.returnPressed.connect(self.filterActivated.emit)
-            self._editors.append(editor)
+        # while self._editors:
+        #     # clear all editors
+        #     # remove editor list last element
+        #     editor = self._editors.pop()
+        #     editor.deleteLater()
+        # create only once
+        if not self._editors:
+            for index in range(count):
+                editor = QLineEdit(self.parent())
+                editor.setPlaceholderText(str(index))
+                editor.returnPressed.connect(self.filterActivated.emit)
+                self._editors.append(editor)
         self.adjustPositions()
 
     # This property holds the recommended size
@@ -129,6 +131,7 @@ class FilterHeader(QHeaderView):
             height = self._editors[0].sizeHint().height()
             # set margin (add space for lineedit to insert there), last parameter is bottom margin
             self.setViewportMargins(0, 0, 0, height + self._padding)
+            # self.setViewportMargins(0, 0, 0, 100)
         else:
             self.setViewportMargins(0, 0, 0, 0)
         super().updateGeometries()
@@ -189,7 +192,6 @@ class Header(QHeaderView):
         menu.exec_(self.mapToGlobal(point))
 
 
-
 def bool_false_check(value):
     """
     Used to convert bool entrance to false.
@@ -227,7 +229,7 @@ class DataFrameModel(QAbstractTableModel):
         self.df_header = dataFrame.columns.tolist()
         self._format = format
         self.complex_intran = None
-        
+
         self.total_rows = self.df.shape[0]
         self.total_cols = self.df.shape[1]
         size = self.total_rows * self.total_cols
@@ -322,7 +324,7 @@ class DataFrameModel(QAbstractTableModel):
         minimum of the absolute values. If vmax equals vmin, then vmin is 
         decreased by one.
         """
-        if self.df.shape[0] == 0: # If no rows to compute max/min then return
+        if self.df.shape[0] == 0:  # If no rows to compute max/min then return
             return
         self.max_min_col = []
         for dummy, col in self.df.iteritems():
@@ -601,9 +603,9 @@ class DataFrameView(QTableView):
         config_shortcut(self.copy, context='variable_explorer', name='copy',
                         parent=self)
         self.horizontalScrollBar().valueChanged.connect(
-                        lambda val: self.load_more_data(val, columns=True))
+            lambda val: self.load_more_data(val, columns=True))
         self.verticalScrollBar().valueChanged.connect(
-                        lambda val: self.load_more_data(val, rows=True))
+            lambda val: self.load_more_data(val, rows=True))
 
     def load_more_data(self, value, rows=False, columns=False):
         """Load more rows and columns to display."""
@@ -617,7 +619,8 @@ class DataFrameView(QTableView):
     def sortByColumn(self, index):
         """Implement a column sort."""
         if self.sort_old == [None]:
-            self.header_class.setSortIndicatorShown(True)
+            self.header_class.setSortIndicatorShown(True) \
+                # the arrow in header
         sort_order = self.header_class.sortIndicatorOrder()
         self.sig_sort_by_column.emit()
         if not self.model().sort(index, sort_order):
@@ -742,7 +745,7 @@ class DataFrameHeaderModel(QAbstractTableModel):
 
     def fetch_more(self, rows=False, columns=False):
         """Get more columns or rows (based on axis)."""
-        if  self.axis == 1 and self.total_rows > self.rows_loaded:
+        if self.axis == 1 and self.total_rows > self.rows_loaded:
             reminder = self.total_rows - self.rows_loaded
             items_to_fetch = min(reminder, ROWS_TO_LOAD)
             self.beginInsertRows(QModelIndex(), self.rows_loaded,
@@ -801,8 +804,8 @@ class DataFrameHeaderModel(QAbstractTableModel):
         This is used when a header has levels.
         """
         if not index.isValid() or \
-           index.row() >= self._shape[0] or \
-           index.column() >= self._shape[1]:
+                        index.row() >= self._shape[0] or \
+                        index.column() >= self._shape[1]:
             return None
         row, col = ((index.row(), index.column()) if self.axis == 0
                     else (index.column(), index.row()))
@@ -864,8 +867,8 @@ class DataFrameLevelModel(QAbstractTableModel):
         if role != Qt.DisplayRole and role != Qt.ToolTipRole:
             return None
         if self.model.header_shape[0] <= 1 and orientation == Qt.Horizontal:
-            if self.model.name(1,section):
-                return self.model.name(1,section)
+            if self.model.name(1, section):
+                return self.model.name(1, section)
             return _('Index')
         elif self.model.header_shape[0] <= 1:
             return None
@@ -1032,14 +1035,14 @@ class DataFrameEditor(QDialog):
         self.table_level.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.table_level.setFrameStyle(QFrame.Plain)
         self.table_level.horizontalHeader().sectionResized.connect(
-                                                        self._index_resized)
+            self._index_resized)
         self.table_level.verticalHeader().sectionResized.connect(
-                                                        self._header_resized)
+            self._header_resized)
         self.table_level.setItemDelegate(QItemDelegate())
         self.layout.addWidget(self.table_level, 0, 0)
         self.table_level.setContentsMargins(0, 0, 0, 0)
         self.table_level.horizontalHeader().sectionClicked.connect(
-                                                            self.sortByIndex)
+            self.sortByIndex)
 
     def create_table_header(self):
         """Create the QTableView that will hold the header model."""
@@ -1052,7 +1055,7 @@ class DataFrameEditor(QDialog):
         # would cause funny behaviour if calling QheaderView and self.table_header.horizontalHeader at the same time
         # custom_header_view = QHeaderView(Qt.Horizontal,self.table_header)
         self.custom_header_view = FilterHeader(self.table_header)
-        # custom_header_view = self.table_header.horizontalHeader()
+        # self.custom_header_view = self.table_header.horizontalHeader()
         # needs to set cliackable manually,  not sure what else needs to self manually when creating qheaderview class
         # maybe check value of each field?
         # https://github.com/spyder-ide/qtpy/blob/master/qtpy/tests/test_patch_qheaderview.py
@@ -1066,8 +1069,7 @@ class DataFrameEditor(QDialog):
         self.table_header.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         self.table_header.setFrameStyle(QFrame.Plain)
-        self.table_header.horizontalHeader().sectionResized.connect(
-            self._column_resized)
+        self.table_header.horizontalHeader().sectionResized.connect(self._column_resized)
         self.table_header.setItemDelegate(QItemDelegate())
         self.layout.addWidget(self.table_header, 0, 1)
 
@@ -1075,7 +1077,6 @@ class DataFrameEditor(QDialog):
         # self.custom_header_.setDefaultAlignment(Qt.AlignLeft)
         #
         # self.custom_header_view.setFilterBoxes(15)
-
 
     def create_table_index(self):
         """Create the QTableView that will hold the index model."""
@@ -1088,7 +1089,7 @@ class DataFrameEditor(QDialog):
         self.table_index.setVerticalScrollBar(self.vscroll)
         self.table_index.setFrameStyle(QFrame.Plain)
         self.table_index.verticalHeader().sectionResized.connect(
-                                                            self._row_resized)
+            self._row_resized)
         self.table_index.setItemDelegate(QItemDelegate())
         self.layout.addWidget(self.table_index, 1, 0)
         self.table_index.setContentsMargins(0, 0, 0, 0)
@@ -1153,8 +1154,7 @@ class DataFrameEditor(QDialog):
 
         # self._model.header_shape = number of levels in header and index, last_row is 0 in a normal dataframe
         last_row = self._model.header_shape[0] - 1
-        _editor_height = self.custom_header_view._editors[
-            0].sizeHint().height() if self.custom_header_view._editors else 0
+        _editor_height = self.custom_header_view._editors[0].sizeHint().height() if self.custom_header_view._editors else 0
         if last_row < 0:
             hdr_height = self.table_level.horizontalHeader().height()
         else:
@@ -1198,7 +1198,7 @@ class DataFrameEditor(QDialog):
         self._model = model
         sel_model = self.dataTable.selectionModel()
         sel_model.currentColumnChanged.connect(
-                self._resizeCurrentColumnToContents)
+            self._resizeCurrentColumnToContents)
 
         # Asociate the models (level, vertical index and horizontal header)
         # with its corresponding view.
@@ -1206,13 +1206,13 @@ class DataFrameEditor(QDialog):
                                                                 self.palette(),
                                                                 self.font()))
         self._reset_model(self.table_header, DataFrameHeaderModel(
-                                                            model,
-                                                            0,
-                                                            self.palette()))
+            model,
+            0,
+            self.palette()))
         self._reset_model(self.table_index, DataFrameHeaderModel(
-                                                            model,
-                                                            1,
-                                                            self.palette()))
+            model,
+            1,
+            self.palette()))
 
         # Needs to be called after setting all table models
         if relayout:
@@ -1253,7 +1253,7 @@ class DataFrameEditor(QDialog):
             width = min(self.max_width, data_width)
         elif hdr_width > data_width * 2:
             width = max(min(hdr_width, self.min_trunc), min(self.max_width,
-                        data_width))
+                                                            data_width))
         else:
             width = min(self.max_width, hdr_width)
         header.setColumnWidth(col, width)
@@ -1418,12 +1418,13 @@ class DataFrameEditor(QDialog):
     def textbox_return(self):
         print(self.textbox.text())
 
-#==============================================================================
+
+# ==============================================================================
 # Tests
-#==============================================================================
+# ==============================================================================
 def test_edit(data, title="", parent=None):
     """Test subroutine"""
-    app = qapplication()                  # analysis:ignore
+    app = qapplication()  # analysis:ignore
     dlg = DataFrameEditor(parent=parent)
 
     if dlg.setup_and_check(data, title=title):
@@ -1440,18 +1441,18 @@ def test():
     from pandas.util.testing import assert_frame_equal, assert_series_equal
 
     df1 = DataFrame([
-                     [True, "bool"],
-                     [1+1j, "complex"],
-                     ['test', "string"],
-                     [1.11, "float"],
-                     [1, "int"],
-                     [np.random.rand(3, 3), "Unkown type"],
-                     ["Large value", 100],
-                     ["áéí", "unicode"]
-                    ],
-                    index=['a', 'b', nan, nan, nan, 'c',
-                           "Test global max", 'd'],
-                    columns=[nan, 'Type'])
+        [True, "bool"],
+        [1 + 1j, "complex"],
+        ['test', "string"],
+        [1.11, "float"],
+        [1, "int"],
+        [np.random.rand(3, 3), "Unkown type"],
+        ["Large value", 100],
+        ["áéí", "unicode"]
+    ],
+        index=['a', 'b', nan, nan, nan, 'c',
+               "Test global max", 'd'],
+        columns=[nan, 'Type'])
     # out = test_edit(df1)
     # assert_frame_equal(df1, out)
     #
