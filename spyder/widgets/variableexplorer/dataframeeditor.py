@@ -82,10 +82,13 @@ BACKGROUND_MISC_ALPHA = 0.3
 from qtpy.QtWidgets import QHeaderView
 # signal = pyqtSignal
 from qtpy.QtCore import Signal, Qt
+from PyQt5.QtCore import pyqtSignal
 
 
+# Source
+# https://stackoverflow.com/questions/44343738/how-to-inject-widgets-between-qheaderview-and-qtableview
 class FilterHeader(QHeaderView):
-    filterActivated = Signal()
+    filterActivated = pyqtSignal()
 
     def __init__(self, parent):
         super().__init__(Qt.Horizontal, parent)
@@ -102,11 +105,6 @@ class FilterHeader(QHeaderView):
         parent.horizontalScrollBar().valueChanged.connect(self.adjustPositions)
 
     def setFilterBoxes(self, count):
-        # while self._editors:
-        #     # clear all editors
-        #     # remove editor list last element
-        #     editor = self._editors.pop()
-        #     editor.deleteLater()
         # create only once
         if not self._editors:
             for index in range(count):
@@ -158,6 +156,9 @@ class FilterHeader(QHeaderView):
         if 0 <= index < len(self._editors):
             return self._editors[index].text()
         return ''
+
+    def getText(self):
+        return [self._editors[index].text() for index in range(0, len(self._editors))]
 
     def setFilterText(self, index, text):
         if 0 <= index < len(self._editors):
@@ -367,13 +368,27 @@ class DataFrameModel(QAbstractTableModel):
             self.return_max = global_max
         self.reset()
 
-    def set_filter(self):
+    def set_filter(self, filter_list):
         # init original df
         if self.original_df is None:
             self.original_df = self.df
-        # use @ for variables in environment
-        text = "A > 1"
-        self.df = self.original_df.query(text).copy()
+        # TOOD: replace "" for string
+        query_list = []
+        for idx, filter in enumerate(filter_list):
+            if filter != "":
+                column_name = str(self.original_df.columns[idx])
+                # either put the column_name in front or replace @@
+                if "@@" in filter:
+                    filter = filter.replace("@@", column_name)
+                else:
+                    filter = column_name + filter
+                query_list.append("(" + filter + ")")
+        query_text = "and ".join(query_list)
+        print(query_text)
+        try:
+            self.df = self.original_df.query(query_text).copy()
+        except:
+            print("Error in query")
         # reset total rows
         self.total_rows = self.df.shape[0]
         self.reset()
@@ -1220,7 +1235,9 @@ class DataFrameEditor(QDialog):
 
         # after set model, set filter box
         self.custom_header_view.setFilterBoxes(self._model.shape[1])
-
+        # connect to handler when initialized
+        if self.custom_header_view.receivers(self.custom_header_view.filterActivated) == 0:
+            self.custom_header_view.filterActivated.connect(self.handleFilterActivated)
 
     def setCurrentIndex(self, y, x):
         """Set current selection."""
@@ -1271,23 +1288,14 @@ class DataFrameEditor(QDialog):
             # resize event handled here
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.KeyPress:
-            pass
         """Override eventFilter to catch resize event."""
         if obj == self.dataTable and event.type() == QEvent.Resize:
             self._resizeVisibleColumnsToContents()
-
         return False
 
     def keyPressEvent(self, event):
-        """Capture and ignore all key press events.
-
-        This is used so that return key event does not trigger the exit button
-        from the dialog. We need to allow the return key to be used in filters
-        in the widget."""
-
-        # suspress enter key
-        if event.key() == Qt.Key_Enter:
+        # This is to block the enter/return key to its parent and exiting the application
+        if event.key() == Qt.Key_Enter or event.key() == Qt.Key_Return:
             pass
         else:
             super(DataFrameEditor, self).keyPressEvent(event)
@@ -1411,12 +1419,17 @@ class DataFrameEditor(QDialog):
         self._update_header_size()
         QApplication.restoreOverrideCursor()
 
-    def set_filter(self):
-        self.dataModel.set_filter()
+    def set_filter(self, filter_list):
+        self.dataModel.set_filter(filter_list)
         self.setModel(self.dataTable.model())
 
     def textbox_return(self):
         print(self.textbox.text())
+
+    def handleFilterActivated(self):
+        test = self.custom_header_view.getText()
+        print(test)
+        self.set_filter(test)
 
 
 # ==============================================================================
@@ -1467,7 +1480,7 @@ def test():
     # series = Series(np.arange(10), name=0)
     # out = test_edit(series)
     # assert_series_equal(series, out)
-    df1 = DataFrame(np.random.rand(1000, 20), columns=range(0, 20))
+    df1 = DataFrame(np.random.rand(1000, 20), columns=list(map(chr, range(97, 117))))
     df1 = df1.join([DataFrame(np.random.rand(1000, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
     out = test_edit(df1)
 
