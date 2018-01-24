@@ -324,24 +324,36 @@ class DataFrameModel(QAbstractTableModel):
         is set to None. If the dtype is complex, then compute the maximum and
         minimum of the absolute values. If vmax equals vmin, then vmin is 
         decreased by one.
+
+        Added String Min Max
         """
         if self.df.shape[0] == 0:  # If no rows to compute max/min then return
             return
         self.max_min_col = []
-        for dummy, col in self.df.iteritems():
-            if col.dtype in REAL_NUMBER_TYPES + COMPLEX_NUMBER_TYPES:
-                if col.dtype in REAL_NUMBER_TYPES:
-                    vmax = col.max(skipna=True)
-                    vmin = col.min(skipna=True)
-                else:
-                    vmax = col.abs().max(skipna=True)
-                    vmin = col.abs().min(skipna=True)
-                if vmax != vmin:
-                    max_min = [vmax, vmin]
-                else:
-                    max_min = [vmax, vmin - 1]
+        self.unique_items = [None] * self.df.shape[1]
+        # loop by column
+        for idx, (_, col) in enumerate(self.df.iteritems()):
+            if col.dtype in REAL_NUMBER_TYPES:
+                vmax = col.max(skipna=True)
+                vmin = col.min(skipna=True)
+            elif col.dtype in COMPLEX_NUMBER_TYPES:
+                vmax = col.abs().max(skipna=True)
+                vmin = col.abs().min(skipna=True)
+            # for other objects, check # unique items, if value is greater than threshold, set as None
+            # otherwise, add a list of unique items to self.unique_items
             else:
-                max_min = None
+                unique_items = set(col)
+                if len(unique_items) < 15:
+                    vmax = len(unique_items)
+                    vmin = 1
+                    self.unique_items[idx] = [i for i in unique_items]
+                else:
+                    self.max_min_col.append(None)
+                    continue
+            if vmax != vmin:
+                max_min = [vmax, vmin]
+            else:
+                max_min = [vmax, vmin - 1]
             self.max_min_col.append(max_min)
 
     def get_format(self):
@@ -384,11 +396,15 @@ class DataFrameModel(QAbstractTableModel):
                     filter = column_name + filter
                 query_list.append("(" + filter + ")")
         query_text = "and ".join(query_list)
+        # TODO: support startswith
         print(query_text)
-        try:
-            self.df = self.original_df.query(query_text).copy()
-        except:
-            print("Error in query")
+        if query_text == "":
+            self.df = self.original_df
+        else:
+            try:
+                self.df = self.original_df.query(query_text).copy()
+            except:
+                print("Error in query")
         # reset total rows
         self.total_rows = self.df.shape[0]
         self.reset()
@@ -403,14 +419,20 @@ class DataFrameModel(QAbstractTableModel):
         if self.max_min_col[column] is None:
             color = QColor(BACKGROUND_NONNUMBER_COLOR)
             if is_text_string(value):
+                # transparency
                 color.setAlphaF(BACKGROUND_STRING_ALPHA)
             else:
                 color.setAlphaF(BACKGROUND_MISC_ALPHA)
         else:
             if isinstance(value, COMPLEX_NUMBER_TYPES):
                 color_func = abs
-            else:
+            elif isinstance(value, REAL_NUMBER_TYPES):
                 color_func = float
+            # other objects
+            else:
+                color_func = abs
+                value = self.unique_items[column].index(value)
+            # self.return_max returns global max or column max
             vmax, vmin = self.return_max(self.max_min_col, column)
             hue = (BACKGROUND_NUMBER_MINHUE + BACKGROUND_NUMBER_HUERANGE *
                    (vmax - color_func(value)) / (vmax - vmin))
@@ -1451,37 +1473,13 @@ def test_edit(data, title="", parent=None):
 def test():
     """DataFrame editor test"""
     from numpy import nan
-    from pandas.util.testing import assert_frame_equal, assert_series_equal
+    import random
 
-    df1 = DataFrame([
-        [True, "bool"],
-        [1 + 1j, "complex"],
-        ['test', "string"],
-        [1.11, "float"],
-        [1, "int"],
-        [np.random.rand(3, 3), "Unkown type"],
-        ["Large value", 100],
-        ["áéí", "unicode"]
-    ],
-        index=['a', 'b', nan, nan, nan, 'c',
-               "Test global max", 'd'],
-        columns=[nan, 'Type'])
-    # out = test_edit(df1)
-    # assert_frame_equal(df1, out)
-    #
-    # result = Series([True, "bool"], index=[nan, 'Type'], name='a')
-    # out = test_edit(df1.iloc[0])
-    # assert_series_equal(result, out)
-    #
-    # df1 = DataFrame(np.random.rand(100100, 10))
-    # out = test_edit(df1)
-    # assert_frame_equal(out, df1)
-    #
-    # series = Series(np.arange(10), name=0)
-    # out = test_edit(series)
-    # assert_series_equal(series, out)
-    df1 = DataFrame(np.random.rand(1000, 20), columns=list(map(chr, range(97, 117))))
-    df1 = df1.join([DataFrame(np.random.rand(1000, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
+    string_list = ['AAAA', 'BBBBB', 'CCCCCCC', 'DDDDDDDD', 'EEEEEEE']
+    nrow = 10000
+    df1 = DataFrame([random.choice(string_list) for _ in range(nrow)], columns=['Test'])
+    df1 = df1.join([DataFrame(np.random.rand(nrow, 10), columns=list(map(chr, range(97, 107))))])
+    df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
     out = test_edit(df1)
 
 
