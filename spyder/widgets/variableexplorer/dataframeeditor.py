@@ -35,7 +35,7 @@ from qtpy.QtWidgets import (QApplication, QCheckBox, QDialogButtonBox, QDialog,
                             QGridLayout, QHBoxLayout, QInputDialog, QLineEdit,
                             QMenu, QMessageBox, QPushButton, QTableView,
                             QScrollBar, QTableWidget, QFrame,
-                            QItemDelegate)
+                            QItemDelegate, QStyleFactory)
 
 from pandas import DataFrame, Index, Series
 import numpy as np
@@ -1457,9 +1457,13 @@ class DataFrameEditor(QDialog):
 # ==============================================================================
 # Tests
 # ==============================================================================
+from spyder.widgets.variableexplorer.originaldataframeeditor import test_edit_original
 def test_edit(data, title="", parent=None):
     """Test subroutine"""
+    # QApplication.setStyle("cleanlooks")
     app = qapplication()  # analysis:ignore
+    # cross platform pyqt5 style
+    app.setStyle("Fusion")
     dlg = DataFrameEditor(parent=parent)
 
     if dlg.setup_and_check(data, title=title):
@@ -1481,6 +1485,7 @@ def test():
     df1 = df1.join([DataFrame(np.random.rand(nrow, 10), columns=list(map(chr, range(97, 107))))])
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
     out = test_edit(df1)
+    test_edit_original(df1)
 
 
 if __name__ == '__main__':
