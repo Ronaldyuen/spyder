@@ -10,7 +10,6 @@ Tests for the main window
 
 import os
 import os.path as osp
-from sys import version_info
 import shutil
 import tempfile
 try:
@@ -29,8 +28,8 @@ from qtpy.QtTest import QTest
 from qtpy.QtWidgets import QApplication, QFileDialog, QLineEdit
 
 from spyder import __trouble_url__
-from spyder.app.cli_options import get_options
-from spyder.app.mainwindow import initialize, run_spyder, MainWindow
+from spyder.app.mainwindow import MainWindow  # Tests fail without this import
+from spyder.app import start
 from spyder.config.base import get_home_dir
 from spyder.config.main import CONF
 from spyder.plugins.runconfig import RunConfiguration
@@ -64,9 +63,6 @@ COMPILE_AND_EVAL_TIMEOUT=30000
 # miliseconds)
 EVAL_TIMEOUT = 3000
 
-# Test for PyQt 5 wheels
-PYQT_WHEEL = PYQT_VERSION > '5.6'
-
 # Temporary directory
 TEMP_DIRECTORY = tempfile.gettempdir()
 
@@ -84,11 +80,13 @@ def open_file_in_editor(main_window, fname, directory=None):
             input_field.setText(fname)
             QTest.keyClick(w, Qt.Key_Enter)
 
+
 def get_thirdparty_plugin(main_window, plugin_title):
     """Get a reference to the thirdparty plugin with the title given."""
     for plugin in main_window.thirdparty_plugins:
         if plugin.get_plugin_title() == plugin_title:
             return plugin
+
 
 def reset_run_code(qtbot, shell, code_editor, nsb):
     """Reset state after a run code test"""
@@ -138,13 +136,21 @@ def main_window(request):
         except KeyError:
             pass
 
+    # Only use single_instance mode for tests that require it
+    single_instance = request.node.get_marker('single_instance')
+    if single_instance:
+        CONF.set('main', 'single_instance', True)
+    else:
+        CONF.set('main', 'single_instance', False)
+
     # Start the window
-    app = initialize()
-    options, args = get_options()
-    window = run_spyder(app, options, args)
+    window = start.main()
+
+    # Teardown
     def close_window():
         window.close()
     request.addfinalizer(close_window)
+
     return window
 
 
@@ -153,13 +159,14 @@ def main_window(request):
 #==============================================================================
 # IMPORTANT NOTE: Please leave this test to be the first one here to
 # avoid possible timeouts in Appveyor
+@pytest.mark.slow
 @pytest.mark.use_introspection
 @flaky(max_runs=3)
-@pytest.mark.skipif(os.environ.get('CI', None) is not None or os.name == 'nt' or PY2,
-                    reason="It times out in our CIs, and apparently Windows.")
-@pytest.mark.timeout(timeout=60, method='thread')
+@pytest.mark.skipif(os.name == 'nt' or (not PY2 and PYQT_VERSION < "5.9.0"),
+                    reason="It times out on AppVeyor and fails on PY3 and PyQt 5.6")
+@pytest.mark.timeout(timeout=45, method='thread')
 def test_calltip(main_window, qtbot):
-    """Hide the calltip in the editor when a matching ')' is found."""
+    """Test that the calltip in editor is hidden when matching ')' is found."""
     # Load test file
     text = 'a = [1,2,3]\n(max'
     main_window.editor.new(fname="test.py", text=text)
@@ -181,6 +188,40 @@ def test_calltip(main_window, qtbot):
     assert not calltip.isVisible()
     qtbot.keyPress(code_editor, Qt.Key_ParenRight, delay=1000)
     qtbot.keyPress(code_editor, Qt.Key_Enter, delay=1000)
+
+    main_window.editor.close_file()
+
+
+@pytest.mark.slow
+@pytest.mark.single_instance
+def test_single_instance_and_edit_magic(main_window, qtbot, tmpdir):
+    """Test single instance mode and for %edit magic."""
+    editorstack = main_window.editor.get_current_editorstack()
+    shell = main_window.ipyconsole.get_current_shellwidget()
+    qtbot.waitUntil(lambda: shell._prompt_html is not None, timeout=SHELL_TIMEOUT)
+
+    lock_code = ("from spyder.config.base import get_conf_path\n"
+                 "from spyder.utils.external import lockfile\n"
+                 "lock_file = get_conf_path('spyder.lock')\n"
+                 "lock = lockfile.FilesystemLock(lock_file)\n"
+                 "lock_created = lock.lock()")
+
+    # Test single instance
+    with qtbot.waitSignal(shell.executed):
+        shell.execute(lock_code)
+    assert not shell.get_value('lock_created')
+
+    # Test %edit magic
+    n_editors = editorstack.get_stack_count()
+    p = tmpdir.mkdir("foo").join("bar.py")
+    p.write(lock_code)
+
+    with qtbot.waitSignal(shell.executed):
+        shell.execute('%edit {}'.format(to_text_string(p)))
+
+    qtbot.wait(3000)
+    assert editorstack.get_stack_count() == n_editors + 1
+    assert editorstack.get_current_editor().toPlainText() == lock_code
 
     main_window.editor.close_file()
 
