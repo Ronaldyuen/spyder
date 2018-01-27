@@ -149,10 +149,10 @@ class FilterHeader(QHeaderView):
             # sectionPosition = 0 in default position
             # offset: header's left most visible pixel position
             x = self.sectionPosition(index) - self.offset()
-            y = height + (self._padding // 2)
-            # y = 1
+            # check the original header height
+            y = super().sizeHint().height()
             # move to x,y position
-            # not moved to correct position if sudden move, maybe should not connect directly to hscroll
+            # coordinates is left and top most of the structure
             editor.move(x, y)
             editor.resize(self.sectionSize(index), height)
 
