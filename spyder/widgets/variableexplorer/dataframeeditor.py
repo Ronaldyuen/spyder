@@ -966,6 +966,7 @@ class DataFrameEditor(QDialog):
         self.is_series = False
         self.layout = None
 
+
     def setup_and_check(self, data, title=''):
         """
         Setup DataFrameEditor:
@@ -1015,7 +1016,9 @@ class DataFrameEditor(QDialog):
 
         # autosize columns on-demand
         self._autosized_cols = set()
-        self._max_autosize_ms = None
+        # self._max_autosize_ms = None
+        # this is the time limit for resizing
+        self.setAutosizeLimit(0.0001)
         self.dataTable.installEventFilter(self)
 
         avg_width = self.fontMetrics().averageCharWidth()
@@ -1273,6 +1276,8 @@ class DataFrameEditor(QDialog):
             self.dataTable.model().index(y, x),
             QItemSelectionModel.ClearAndSelect)
 
+    # This function tried to find the maximum width for each column, by looking at the width of all the rows
+    # theres a time limit for this function, but the default is set to zero
     def _sizeHintForColumn(self, table, col, limit_ms=None):
         """Get the size hint for a given column in a table."""
         max_row = table.model().rowCount()
@@ -1464,6 +1469,8 @@ class DataFrameEditor(QDialog):
 # Tests
 # ==============================================================================
 from spyder.widgets.variableexplorer.originaldataframeeditor import test_edit_original
+from spyder.widgets.variableexplorer.dataframeeditor3x import test_edit_3x
+
 def test_edit(data, title="", parent=None):
     """Test subroutine"""
     # QApplication.setStyle("cleanlooks")
@@ -1480,6 +1487,21 @@ def test_edit(data, title="", parent=None):
         sys.exit(1)
 
 
+import cProfile
+
+
+def test_wrapper(_function, _dataframe, is_profiling=False):
+    if is_profiling:
+        pr = cProfile.Profile()
+        pr.enable()
+        _function(_dataframe)
+        pr.disable()
+        # after your program ends
+        pr.print_stats(sort="calls")
+    else:
+        _function(_dataframe)
+
+
 def test():
     """DataFrame editor test"""
     from numpy import nan
@@ -1490,9 +1512,10 @@ def test():
     df1 = DataFrame([random.choice(string_list) for _ in range(nrow)], columns=['Test'])
     df1 = df1.join([DataFrame(np.random.rand(nrow, 10), columns=list(map(chr, range(97, 107))))])
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
-    out = test_edit(df1)
-    test_edit_original(df1)
 
+    test_wrapper(test_edit, df1, True)
+    test_wrapper(test_edit_original, df1, True)
+    test_wrapper(test_edit_3x, df1, True)
 
 if __name__ == '__main__':
     test()
