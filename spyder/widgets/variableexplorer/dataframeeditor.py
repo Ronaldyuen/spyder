@@ -25,7 +25,7 @@ Pandas DataFrame Editor Dialog
 
 # Standard library imports
 import time
-
+import collections
 # Third party imports
 from qtpy.compat import from_qvariant, to_qvariant
 from qtpy.QtCore import (QAbstractTableModel, QModelIndex, Qt, Signal, Slot,
@@ -346,7 +346,11 @@ class DataFrameModel(QAbstractTableModel):
             # for other objects, check # unique items, if value is greater than threshold, set as None
             # otherwise, add a list of unique items to self.unique_items
             else:
-                unique_items = set(col)
+                try:
+                    unique_items = set(col)
+                # when items in col is not hashable
+                except TypeError:
+                    self.max_min_col.append(None)
                 if len(unique_items) < 15:
                     vmax = len(unique_items)
                     vmin = 1
@@ -1512,10 +1516,11 @@ def test():
     df1 = DataFrame([random.choice(string_list) for _ in range(nrow)], columns=['Test'])
     df1 = df1.join([DataFrame(np.random.rand(nrow, 10), columns=list(map(chr, range(97, 107))))])
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
+    df1 = df1.join([DataFrame([{'F': [1, 2, 3, 4]}])])
 
-    test_wrapper(test_edit, df1, True)
-    test_wrapper(test_edit_original, df1, True)
-    test_wrapper(test_edit_3x, df1, True)
+    test_wrapper(test_edit, df1, is_profiling=False)
+    # test_wrapper(test_edit_original, df1, True)
+    # test_wrapper(test_edit_3x, df1, True)
 
 if __name__ == '__main__':
     test()
