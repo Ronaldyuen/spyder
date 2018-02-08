@@ -25,7 +25,7 @@ Pandas DataFrame Editor Dialog
 
 # Standard library imports
 import time
-import collections
+import math
 # Third party imports
 from qtpy.compat import from_qvariant, to_qvariant
 from qtpy.QtCore import (QAbstractTableModel, QModelIndex, Qt, Signal, Slot,
@@ -38,6 +38,7 @@ from qtpy.QtWidgets import (QApplication, QCheckBox, QDialogButtonBox, QDialog,
                             QItemDelegate, QStyleFactory)
 
 from pandas import DataFrame, Index, Series
+
 try:
     from pandas._libs.tslib import OutOfBoundsDatetime
 except ImportError:  # For pandas version < 0.20
@@ -351,9 +352,10 @@ class DataFrameModel(QAbstractTableModel):
                 # when items in col is not hashable
                 except TypeError:
                     self.max_min_col.append(None)
+                    continue
                 if len(unique_items) < 15:
-                    vmax = len(unique_items)
-                    vmin = 1
+                    vmax = len(unique_items) - 1
+                    vmin = 0
                     self.unique_items[idx] = [i for i in unique_items]
                 else:
                     self.max_min_col.append(None)
@@ -436,15 +438,18 @@ class DataFrameModel(QAbstractTableModel):
                 color_func = abs
             elif isinstance(value, REAL_NUMBER_TYPES):
                 color_func = float
-            # other objects
+            # other objects, just like int
             else:
-                color_func = abs
+                color_func = float
                 value = self.unique_items[column].index(value)
             # self.return_max returns global max or column max
             vmax, vmin = self.return_max(self.max_min_col, column)
             hue = (BACKGROUND_NUMBER_MINHUE + BACKGROUND_NUMBER_HUERANGE *
                    (vmax - color_func(value)) / (vmax - vmin))
             hue = float(abs(hue))
+            # no color for nan values
+            if math.isnan(hue):
+                return
             if hue > 1:
                 hue = 1
             color = QColor.fromHsvF(hue, BACKGROUND_NUMBER_SATURATION,
@@ -970,7 +975,6 @@ class DataFrameEditor(QDialog):
         self.is_series = False
         self.layout = None
 
-
     def setup_and_check(self, data, title=''):
         """
         Setup DataFrameEditor:
@@ -1475,6 +1479,7 @@ class DataFrameEditor(QDialog):
 from spyder.widgets.variableexplorer.originaldataframeeditor import test_edit_original
 from spyder.widgets.variableexplorer.dataframeeditor3x import test_edit_3x
 
+
 def test_edit(data, title="", parent=None):
     """Test subroutine"""
     # QApplication.setStyle("cleanlooks")
@@ -1512,15 +1517,19 @@ def test():
     import random
 
     string_list = ['AAAA', 'BBBBB', 'CCCCCCC', 'DDDDDDDD', 'EEEEEEE']
+    true_false_list = ['AA', 'BB']
     nrow = 10000
     df1 = DataFrame([random.choice(string_list) for _ in range(nrow)], columns=['Test'])
+    df1 = df1.join([DataFrame([random.choice(true_false_list) for _ in range(nrow)], columns=['TrueFalse'])])
     df1 = df1.join([DataFrame(np.random.rand(nrow, 10), columns=list(map(chr, range(97, 107))))])
+    df1.loc[1, 'a'] = float('nan')
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
     df1 = df1.join([DataFrame([{'F': [1, 2, 3, 4]}])])
 
     test_wrapper(test_edit, df1, is_profiling=False)
     # test_wrapper(test_edit_original, df1, True)
     # test_wrapper(test_edit_3x, df1, True)
+
 
 if __name__ == '__main__':
     test()
