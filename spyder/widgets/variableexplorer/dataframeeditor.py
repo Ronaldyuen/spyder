@@ -26,6 +26,14 @@ Pandas DataFrame Editor Dialog
 # Standard library imports
 import time
 import math
+# import logging
+# logger = logging.getLogger("Test")
+# logger.setLevel(logging.INFO)
+# handler = logging.FileHandler('test.log')
+# formatter = logging.Formatter('%(asctime)s - %(funcName)s - %(levelname)s - %(message)s')
+# handler.setFormatter(formatter)
+# handler.setLevel(logging.INFO)
+# logger.addHandler(handler)
 # Third party imports
 from qtpy.compat import from_qvariant, to_qvariant
 from qtpy.QtCore import (QAbstractTableModel, QModelIndex, Qt, Signal, Slot,
@@ -1203,6 +1211,7 @@ class DataFrameEditor(QDialog):
         """Set the width and height of the QTableViews and hide rows."""
         h_width = max(self.table_level.verticalHeader().sizeHint().width(),
                       self.table_index.verticalHeader().sizeHint().width())
+        # This is the region left to index and level
         self.table_level.verticalHeader().setFixedWidth(h_width)
         self.table_index.verticalHeader().setFixedWidth(h_width)
 
@@ -1232,6 +1241,7 @@ class DataFrameEditor(QDialog):
             idx_width = self.table_level.columnViewportPosition(last_col) + \
                         self.table_level.columnWidth(last_col) + \
                         self.table_level.verticalHeader().width()
+        # logger.info("Index and level width:" + str(idx_width))
         self.table_index.setFixedWidth(idx_width)
         self.table_level.setFixedWidth(idx_width)
         self._resizeVisibleColumnsToContents()
@@ -1314,6 +1324,7 @@ class DataFrameEditor(QDialog):
                                                             data_width))
         else:
             width = min(self.max_width, hdr_width)
+        # logger.info("col:" + str(col) + "width:" + str(width))
         header.setColumnWidth(col, width)
 
     def _resizeColumnsToContents(self, header, data, limit_ms):
@@ -1331,7 +1342,9 @@ class DataFrameEditor(QDialog):
     def eventFilter(self, obj, event):
         """Override eventFilter to catch resize event."""
         if obj == self.dataTable and event.type() == QEvent.Resize:
-            self._resizeVisibleColumnsToContents()
+            # This fix layout problems
+            self._update_layout()
+            # self._resizeVisibleColumnsToContents()
         return False
 
     def keyPressEvent(self, event):
@@ -1341,13 +1354,16 @@ class DataFrameEditor(QDialog):
         else:
             super(DataFrameEditor, self).keyPressEvent(event)
 
+    # change this to resize all columns
     def _resizeVisibleColumnsToContents(self):
         """Resize the columns that are in the view."""
         index_column = self.dataTable.rect().topLeft().x()
         start = col = self.dataTable.columnAt(index_column)
         width = self._model.shape[1]
-        end = self.dataTable.columnAt(self.dataTable.rect().bottomRight().x())
-        end = width if end == -1 else end + 1
+        # end = self.dataTable.columnAt(self.dataTable.rect().bottomRight().x())
+        # end = width if end == -1 else end + 1
+        # resize all columns now
+        end = width
         if self._max_autosize_ms is None:
             max_col_ms = None
         else:
@@ -1365,6 +1381,7 @@ class DataFrameEditor(QDialog):
                 index_column = self.dataTable.rect().bottomRight().x()
                 end = self.dataTable.columnAt(index_column)
                 end = width if end == -1 else end + 1
+                # logger.info("Update end to:" + str(end))
                 if max_col_ms is not None:
                     max_col_ms = self._max_autosize_ms / max(1, end - start)
 
@@ -1476,13 +1493,8 @@ class DataFrameEditor(QDialog):
 # ==============================================================================
 # Tests
 # ==============================================================================
-from spyder.widgets.variableexplorer.originaldataframeeditor import test_edit_original
-from spyder.widgets.variableexplorer.dataframeeditor3x import test_edit_3x
-
-
 def test_edit(data, title="", parent=None):
     """Test subroutine"""
-    # QApplication.setStyle("cleanlooks")
     app = qapplication()  # analysis:ignore
     # cross platform pyqt5 style
     app.setStyle("Fusion")
@@ -1527,8 +1539,8 @@ def test():
     df1 = df1.join([DataFrame([{'F': [1, 2, 3, 4]}])])
 
     test_wrapper(test_edit, df1, is_profiling=False)
-    # test_wrapper(test_edit_original, df1, True)
-    # test_wrapper(test_edit_3x, df1, True)
+    # test_wrapper(test_edit_original, df1, is_profiling=False)
+    # test_wrapper(test_edit_3x, df1, is_profiling=False)
 
 
 if __name__ == '__main__':
