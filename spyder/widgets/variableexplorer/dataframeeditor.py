@@ -1012,6 +1012,19 @@ class DataFrameEditor(QDialog):
 
         self.hscroll = QScrollBar(Qt.Horizontal)
         self.vscroll = QScrollBar(Qt.Vertical)
+        grey_scroll_style_sheet = """ 
+                        QScrollBar {
+                            background:grey;
+                        }
+                        QScrollBar::add-page{
+                            background:white;
+                        }
+                        QScrollBar::sub-page{
+                            background:white;
+                        }
+                        """
+        self.hscroll.setStyleSheet(grey_scroll_style_sheet)
+        self.vscroll.setStyleSheet(grey_scroll_style_sheet)
 
         # Create the view for the level
         self.create_table_level()
