@@ -343,7 +343,7 @@ class DataFrameModel(QAbstractTableModel):
         if self.df.shape[0] == 0:  # If no rows to compute max/min then return
             return
         self.max_min_col = []
-        self.unique_items = [None] * self.df.shape[1]
+        self.unique_items_col = [None] * self.df.shape[1]
         # loop by column
         for idx, (_, col) in enumerate(self.df.iteritems()):
             if col.dtype in REAL_NUMBER_TYPES:
@@ -356,7 +356,7 @@ class DataFrameModel(QAbstractTableModel):
             # otherwise, add a list of unique items to self.unique_items
             else:
                 try:
-                    unique_items = set(col)
+                    unique_items = sorted(set(col))
                 # when items in col is not hashable
                 except TypeError:
                     self.max_min_col.append(None)
@@ -364,7 +364,7 @@ class DataFrameModel(QAbstractTableModel):
                 if len(unique_items) < 15:
                     vmax = len(unique_items) - 1
                     vmin = 0
-                    self.unique_items[idx] = [i for i in unique_items]
+                    self.unique_items_col[idx] = [i for i in unique_items]
                 else:
                     self.max_min_col.append(None)
                     continue
@@ -449,7 +449,7 @@ class DataFrameModel(QAbstractTableModel):
             # other objects, just like int
             else:
                 color_func = float
-                value = self.unique_items[column].index(value)
+                value = self.unique_items_col[column].index(value)
             # self.return_max returns global max or column max
             vmax, vmin = self.return_max(self.max_min_col, column)
             hue = (BACKGROUND_NUMBER_MINHUE + BACKGROUND_NUMBER_HUERANGE *
@@ -1524,16 +1524,16 @@ def test_edit(data, title="", parent=None):
 import cProfile
 
 
-def test_wrapper(_function, _dataframe, is_profiling=False):
+def test_wrapper(func, df, is_profiling=False):
     if is_profiling:
         pr = cProfile.Profile()
         pr.enable()
-        _function(_dataframe)
+        func(df)
         pr.disable()
         # after your program ends
         pr.print_stats(sort="calls")
     else:
-        _function(_dataframe)
+        func(df)
 
 
 def test():
@@ -1542,10 +1542,13 @@ def test():
     import random
 
     string_list = ['AAAA', 'BBBBB', 'CCCCCCC', 'DDDDDDDD', 'EEEEEEE']
-    true_false_list = ['AA', 'BB']
+    true_false_list = [True, False]
     nrow = 10000
-    df1 = DataFrame([random.choice(string_list) for _ in range(nrow)], columns=['Test'])
-    df1 = df1.join([DataFrame([random.choice(true_false_list) for _ in range(nrow)], columns=['TrueFalse'])])
+    r = random.Random(502)
+    df1 = DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list'])
+    df1 = df1.join([DataFrame([r.choice(true_false_list) for _ in range(nrow)], columns=['true_false_list'])])
+    df1 = df1.join([DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list_2'])])
+    df1 = df1.join([DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list_3'])])
     df1 = df1.join([DataFrame(np.random.rand(nrow, 10), columns=list(map(chr, range(97, 107))))])
     df1.loc[1, 'a'] = float('nan')
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
