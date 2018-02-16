@@ -233,6 +233,7 @@ class DataFrameModel(QAbstractTableModel):
     For more information please see:
     https://github.com/wavexx/gtabview/blob/master/gtabview/models.py
     """
+    sig_exec_filter = Signal()
 
     def __init__(self, dataFrame, format=DEFAULT_FORMAT, parent=None):
         QAbstractTableModel.__init__(self)
@@ -401,28 +402,33 @@ class DataFrameModel(QAbstractTableModel):
     def set_filter(self, filter_list):
         # init original df
         if self.original_df is None:
-            self.original_df = self.df
+            self.original_df = self.df.copy()
         # TOOD: replace "" for string
         query_list = []
         for idx, filter in enumerate(filter_list):
-            if filter != "":
+            if filter != '':
                 column_name = str(self.original_df.columns[idx])
-                # either put the column_name in front or replace @@
-                if "@@" in filter:
-                    filter = filter.replace("@@", column_name)
+                # either put the column_name in front or replace @@, @@ acts as a placeholder
+                if '@@' in filter:
+                    filter = filter.replace('@@', column_name)
                 else:
-                    filter = column_name + filter
-                query_list.append("(" + filter + ")")
-        query_text = "and ".join(query_list)
+                    filter = 'self.original_df["{}"]'.format(column_name) + filter
+                query_list.append('({})'.format(filter))
+        query_text = 'and '.join(query_list)
         # TODO: support startswith
         print(query_text)
-        if query_text == "":
+        if query_text == '':
             self.df = self.original_df
         else:
             try:
-                self.df = self.original_df.query(query_text).copy()
+                exec_text = 'self.df = self.original_df[{}].copy()'.format(query_text)
+                print(exec_text)
+                exec(exec_text)
+                self.filtered_exec = exec_text.replace('self.df', 'df').replace('self.original_df', 'df')
+                print(self.filtered_exec)
+                self.sig_exec_filter.emit()
             except:
-                print("Error in query")
+                print("Error in filtering")
         # reset total rows
         self.total_rows = self.df.shape[0]
         self.reset()
@@ -1037,6 +1043,7 @@ class DataFrameEditor(QDialog):
 
         # Create the model and view of the data
         self.dataModel = DataFrameModel(data, parent=self)
+        self.dataModel.sig_exec_filter.connect(self.update_exec_filter)
         # data frame view
         self.create_data_table()
 
@@ -1502,10 +1509,15 @@ class DataFrameEditor(QDialog):
         print(test)
         self.set_filter(test)
 
+    def update_exec_filter(self):
+        self.textbox.setText(self.dataModel.filtered_exec)
+
 
 # ==============================================================================
 # Tests
 # ==============================================================================
+from spyder.widgets.variableexplorer.originaldataframeeditor import test_edit_original
+from spyder.widgets.variableexplorer.dataframeeditor3x import test_edit_3x
 def test_edit(data, title="", parent=None):
     """Test subroutine"""
     app = qapplication()  # analysis:ignore
@@ -1543,7 +1555,7 @@ def test():
 
     string_list = ['AAAA', 'BBBBB', 'CCCCCCC', 'DDDDDDDD', 'EEEEEEE']
     true_false_list = [True, False]
-    nrow = 10000
+    nrow = 100000
     r = random.Random(502)
     df1 = DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list'])
     df1 = df1.join([DataFrame([r.choice(true_false_list) for _ in range(nrow)], columns=['true_false_list'])])
@@ -1555,7 +1567,7 @@ def test():
     df1 = df1.join([DataFrame([{'F': [1, 2, 3, 4]}])])
 
     test_wrapper(test_edit, df1, is_profiling=False)
-    # test_wrapper(test_edit_original, df1, is_profiling=False)
+    test_wrapper(test_edit_original, df1, is_profiling=False)
     # test_wrapper(test_edit_3x, df1, is_profiling=False)
 
 
