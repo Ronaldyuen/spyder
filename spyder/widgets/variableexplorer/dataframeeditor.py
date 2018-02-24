@@ -26,14 +26,37 @@ Pandas DataFrame Editor Dialog
 # Standard library imports
 import time
 import math
-# import logging
-# logger = logging.getLogger("Test")
+import logging
+
+logger = logging.getLogger("Test")
 # logger.setLevel(logging.INFO)
 # handler = logging.FileHandler('test.log')
 # formatter = logging.Formatter('%(asctime)s - %(funcName)s - %(levelname)s - %(message)s')
 # handler.setFormatter(formatter)
 # handler.setLevel(logging.INFO)
 # logger.addHandler(handler)
+import inspect
+import traceback
+import re
+
+
+# Logging with the stack trace
+def stack_log(msg):
+    frame = inspect.currentframe()
+    stack_trace = traceback.format_stack(frame)
+    is_start_recording = False
+    log_text = ""
+    for i in stack_trace[:-1]:
+        match = re.search('.*, line (.*), in (.*)', i)
+        num_line = match.group(1)
+        fun_name = match.group(2)
+        if is_start_recording:
+            log_text += fun_name + " " + num_line + " "
+        if fun_name == "test_edit":
+            is_start_recording = True
+    logger.info("[{}]".format(log_text) + msg)
+
+
 # Third party imports
 from qtpy.compat import from_qvariant, to_qvariant
 from qtpy.QtCore import (QAbstractTableModel, QModelIndex, Qt, Signal, Slot,
@@ -601,6 +624,7 @@ class DataFrameModel(QAbstractTableModel):
 
     def rowCount(self, index=QModelIndex()):
         """DataFrame row number"""
+        # TODO: check interaction with filter
         if self.total_rows <= self.rows_loaded:
             return self.total_rows
         else:
@@ -651,6 +675,7 @@ class DataFrameView(QTableView):
     sig_sort_by_column = Signal()
     sig_fetch_more_columns = Signal()
     sig_fetch_more_rows = Signal()
+    sig_resize_columns = Signal()
 
     def __init__(self, parent, model, header, hscroll, vscroll):
         """Constructor."""
@@ -658,6 +683,7 @@ class DataFrameView(QTableView):
         self.setModel(model)
         self.setHorizontalScrollBar(hscroll)
         self.setVerticalScrollBar(vscroll)
+        # set to scrollperpixel, (The view will scroll the contents one pixel at a time)
         self.setHorizontalScrollMode(1)
         self.setVerticalScrollMode(1)
 
@@ -681,6 +707,8 @@ class DataFrameView(QTableView):
         if columns and value == self.horizontalScrollBar().maximum():
             self.model().fetch_more(columns=columns)
             self.sig_fetch_more_columns.emit()
+        if columns:
+            self.sig_resize_columns.emit()
 
     def sortByColumn(self, index):
         """Implement a column sort."""
@@ -1194,6 +1222,7 @@ class DataFrameEditor(QDialog):
         self.dataTable.sig_sort_by_column.connect(self._sort_update)
         self.dataTable.sig_fetch_more_columns.connect(self._fetch_more_columns)
         self.dataTable.sig_fetch_more_rows.connect(self._fetch_more_rows)
+        self.dataTable.sig_resize_columns.connect(self._resizeVisibleColumnsToContents)
 
     def sortByIndex(self, index):
         """Implement a Index sort."""
@@ -1226,12 +1255,11 @@ class DataFrameEditor(QDialog):
         self.table_header.setRowHeight(row, new_height)
         self._update_layout()
 
-    # the width and height reset here
+    # the width and height of level, index and header are reset here
     def _update_layout(self):
         """Set the width and height of the QTableViews and hide rows."""
         h_width = max(self.table_level.verticalHeader().sizeHint().width(),
                       self.table_index.verticalHeader().sizeHint().width())
-        # This is the region left to index and level
         self.table_level.verticalHeader().setFixedWidth(h_width)
         self.table_index.verticalHeader().setFixedWidth(h_width)
 
@@ -1281,6 +1309,7 @@ class DataFrameEditor(QDialog):
         """Set the model for the data, header/index and level views."""
         self._model = model
         sel_model = self.dataTable.selectionModel()
+        # not sure what this does
         sel_model.currentColumnChanged.connect(
             self._resizeCurrentColumnToContents)
 
@@ -1334,7 +1363,7 @@ class DataFrameEditor(QDialog):
         return max_width
 
     def _resizeColumnToContents(self, header, data, col, limit_ms):
-        """Resize a column by its contents."""
+        """Resize a column width by width of header and data"""
         hdr_width = self._sizeHintForColumn(header, col, limit_ms)
         data_width = self._sizeHintForColumn(data, col, limit_ms)
         if data_width > hdr_width:
@@ -1348,7 +1377,7 @@ class DataFrameEditor(QDialog):
         header.setColumnWidth(col, width)
 
     def _resizeColumnsToContents(self, header, data, limit_ms):
-        """Resize all the colummns to its contents."""
+        """Resize all the colummns"""
         max_col = data.model().columnCount()
         if limit_ms is None:
             max_col_ms = None
@@ -1361,6 +1390,8 @@ class DataFrameEditor(QDialog):
 
     def eventFilter(self, obj, event):
         """Override eventFilter to catch resize event."""
+        # from installeventfilter, dataframeeditor receive all events from dataTable(DataFrameView)
+        # the events received are catched by this function and only act on it when it is resize
         if obj == self.dataTable and event.type() == QEvent.Resize:
             # This fix layout problems
             self._update_layout()
@@ -1374,16 +1405,32 @@ class DataFrameEditor(QDialog):
         else:
             super(DataFrameEditor, self).keyPressEvent(event)
 
-    # change this to resize all columns
     def _resizeVisibleColumnsToContents(self):
         """Resize the columns that are in the view."""
+        """
+        This is a tricky function, initially I wanted to solve the non-resized columns problem:
+        When scroll to and click on a column that was not in view in initialization, it resizes and causing the view to shift unwantedly.
+       
+        By setting 'end = width', this created an unexpected behaviour of row problem:
+        When scroll to some rows > rows_loaded, the data.table does not fetch data,
+        this might be caused by self.horizontalScrollBar().maximum() having different value.
+        
+        Its unexpected, this function should only setting the width for columns.
+        Further investigations also showed time is also a factor of this behaviour.
+        Setting breakpoint (slowed down the process) also gave different results.
+        
+        Another observation: By setting 'end = end - 1', 'end + 1' works(no rows not loaded issue), setting 'end - 5' does not work.
+        
+        The final solution was to connect the horizontal scroll bar to this function through sig_resize_columns, 
+        it resizes the non-resized columns when the scroll bar is used. This solved both the row and resized problems.  
+        """
+
+        # decide starting column, ending column and time
         index_column = self.dataTable.rect().topLeft().x()
         start = col = self.dataTable.columnAt(index_column)
         width = self._model.shape[1]
-        # end = self.dataTable.columnAt(self.dataTable.rect().bottomRight().x())
-        # end = width if end == -1 else end + 1
-        # resize all columns now
-        end = width
+        end = self.dataTable.columnAt(self.dataTable.rect().bottomRight().x())
+        end = width if end == -1 else end + 1
         if self._max_autosize_ms is None:
             max_col_ms = None
         else:
@@ -1405,6 +1452,7 @@ class DataFrameEditor(QDialog):
                 if max_col_ms is not None:
                     max_col_ms = self._max_autosize_ms / max(1, end - start)
 
+    # not sure what this does
     def _resizeCurrentColumnToContents(self, new_index, old_index):
         """Resize the current column to its contents."""
         if new_index.column() not in self._autosized_cols:
@@ -1489,6 +1537,7 @@ class DataFrameEditor(QDialog):
         """Fetch more data for the index (rows)."""
         self.table_index.model().fetch_more()
 
+    # only used by resize button
     def resize_to_contents(self):
         QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
         self.dataTable.resizeColumnsToContents()
@@ -1557,7 +1606,12 @@ def test():
     true_false_list = [True, False]
     nrow = 100000
     r = random.Random(502)
-    df1 = DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list'])
+    df1 = DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['Test'])
+    df1['Test2'] = df1['Test']
+    df1['Test3'] = df1['Test']
+    df1['Test4'] = df1['Test']
+    df1['Test5'] = df1['Test']
+    df1['Test6'] = df1['Test']
     df1 = df1.join([DataFrame([r.choice(true_false_list) for _ in range(nrow)], columns=['true_false_list'])])
     df1 = df1.join([DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list_2'])])
     df1 = df1.join([DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list_3'])])
@@ -1565,6 +1619,7 @@ def test():
     df1.loc[1, 'a'] = float('nan')
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
     df1 = df1.join([DataFrame([{'F': [1, 2, 3, 4]}])])
+    df1['Test7'] = df1['Test']
 
     test_wrapper(test_edit, df1, is_profiling=False)
     test_wrapper(test_edit_original, df1, is_profiling=False)
