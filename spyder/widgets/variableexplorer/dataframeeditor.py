@@ -27,8 +27,15 @@ Pandas DataFrame Editor Dialog
 import time
 import math
 import logging
+import sys
 
 logger = logging.getLogger("Test")
+logger.setLevel(logging.INFO)
+ch = logging.StreamHandler(sys.stdout)
+ch.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+ch.setFormatter(formatter)
+logger.addHandler(ch)
 # logger.setLevel(logging.INFO)
 # handler = logging.FileHandler('test.log')
 # formatter = logging.Formatter('%(asctime)s - %(funcName)s - %(levelname)s - %(message)s')
@@ -66,8 +73,8 @@ from qtpy.QtWidgets import (QApplication, QCheckBox, QDialogButtonBox, QDialog,
                             QGridLayout, QHBoxLayout, QInputDialog, QLineEdit,
                             QMenu, QMessageBox, QPushButton, QTableView,
                             QScrollBar, QTableWidget, QFrame,
-                            QItemDelegate, QStyleFactory)
-
+                            QItemDelegate, QHeaderView)
+from PyQt5.QtCore import pyqtSignal
 from pandas import DataFrame, Index, Series
 
 try:
@@ -97,13 +104,6 @@ _bool_false = ['false', 'f', '0', '0.', '0.0', ' ']
 # Default format for data frames with floats
 DEFAULT_FORMAT = '%.6g'
 
-# Limit at which dataframe is considered so large that it is loaded on demand
-LARGE_SIZE = 5e5
-LARGE_NROWS = 1e5
-LARGE_COLS = 60
-ROWS_TO_LOAD = 500
-COLS_TO_LOAD = 40
-
 # Background colours
 BACKGROUND_NUMBER_MINHUE = 0.66  # hue for largest number
 BACKGROUND_NUMBER_HUERANGE = 0.33  # (hue for smallest) minus (hue for largest)
@@ -115,15 +115,10 @@ BACKGROUND_INDEX_ALPHA = 0.8
 BACKGROUND_STRING_ALPHA = 0.05
 BACKGROUND_MISC_ALPHA = 0.3
 
-from qtpy.QtWidgets import QHeaderView
-# signal = pyqtSignal
-from qtpy.QtCore import Signal, Qt
-from PyQt5.QtCore import pyqtSignal
 
-
-# Source
-# https://stackoverflow.com/questions/44343738/how-to-inject-widgets-between-qheaderview-and-qtableview
-class FilterHeader(QHeaderView):
+# Adding filters on top of the header
+# Source: https://stackoverflow.com/questions/44343738/how-to-inject-widgets-between-qheaderview-and-qtableview
+class FilterHeaderView(QHeaderView):
     filterActivated = pyqtSignal()
 
     def __init__(self, parent):
@@ -205,30 +200,6 @@ class FilterHeader(QHeaderView):
             editor.clear()
 
 
-from qtpy.QtWidgets import QHeaderView, QAction
-
-
-class Header(QHeaderView):
-    def __init__(self, parent=None):
-        super(Header, self).__init__(Qt.Horizontal, parent)
-
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.customContextMenuRequested.connect(self.ctxMenu)
-        self.hello = QAction("Hello", self)
-        self.hello.triggered.connect(self.printHello)
-        self.currentSection = None
-
-    def printHello(self):
-        data = self.model().headerData(self.currentSection, Qt.Horizontal)
-        print(data.toString())
-
-    def ctxMenu(self, point):
-        menu = QMenu(self)
-        self.currentSection = self.logicalIndexAt(point)
-        menu.addAction(self.hello)
-        menu.exec_(self.mapToGlobal(point))
-
-
 def bool_false_check(value):
     """
     Used to convert bool entrance to false.
@@ -259,6 +230,14 @@ class DataFrameModel(QAbstractTableModel):
     sig_exec_filter = Signal()
 
     def __init__(self, dataFrame, format=DEFAULT_FORMAT, parent=None):
+        # model loading values
+        # Limit at which dataframe is considered so large that it is loaded on demand
+        self.LARGE_SIZE = 5e5
+        self.LARGE_NROWS = 1e5
+        self.LARGE_COLS = 60
+        self.ROWS_TO_LOAD = 500
+        self.COLS_TO_LOAD = 40
+
         QAbstractTableModel.__init__(self)
         self.dialog = parent
         self.df = dataFrame
@@ -273,7 +252,7 @@ class DataFrameModel(QAbstractTableModel):
         size = self.total_rows * self.total_cols
 
         self.max_min_col = None
-        if size < LARGE_SIZE:
+        if size < self.LARGE_SIZE:
             self.max_min_col_update()
             self.colum_avg_enabled = True
             self.bgcolor_enabled = True
@@ -285,16 +264,16 @@ class DataFrameModel(QAbstractTableModel):
 
         # Use paging when the total size, number of rows or number of
         # columns is too large
-        if size > LARGE_SIZE:
-            self.rows_loaded = ROWS_TO_LOAD
-            self.cols_loaded = COLS_TO_LOAD
+        if size > self.LARGE_SIZE:
+            self.rows_loaded = self.ROWS_TO_LOAD
+            self.cols_loaded = self.COLS_TO_LOAD
         else:
-            if self.total_rows > LARGE_NROWS:
-                self.rows_loaded = ROWS_TO_LOAD
+            if self.total_rows > self.LARGE_NROWS:
+                self.rows_loaded = self.ROWS_TO_LOAD
             else:
                 self.rows_loaded = self.total_rows
-            if self.total_cols > LARGE_COLS:
-                self.cols_loaded = COLS_TO_LOAD
+            if self.total_cols > self.LARGE_COLS:
+                self.cols_loaded = self.COLS_TO_LOAD
             else:
                 self.cols_loaded = self.total_cols
 
@@ -631,17 +610,19 @@ class DataFrameModel(QAbstractTableModel):
             return self.rows_loaded
 
     def fetch_more(self, rows=False, columns=False):
+        # This is called when scroll reaches the maximum, load_more_data is called,
+        # which fetches more data for the model and then fetch for the index/header
         """Get more columns and/or rows."""
         if rows and self.total_rows > self.rows_loaded:
             reminder = self.total_rows - self.rows_loaded
-            items_to_fetch = min(reminder, ROWS_TO_LOAD)
+            items_to_fetch = min(reminder, self.ROWS_TO_LOAD)
             self.beginInsertRows(QModelIndex(), self.rows_loaded,
                                  self.rows_loaded + items_to_fetch - 1)
             self.rows_loaded += items_to_fetch
             self.endInsertRows()
         if columns and self.total_cols > self.cols_loaded:
             reminder = self.total_cols - self.cols_loaded
-            items_to_fetch = min(reminder, COLS_TO_LOAD)
+            items_to_fetch = min(reminder, self.COLS_TO_LOAD)
             self.beginInsertColumns(QModelIndex(), self.cols_loaded,
                                     self.cols_loaded + items_to_fetch - 1)
             self.cols_loaded += items_to_fetch
@@ -660,6 +641,12 @@ class DataFrameModel(QAbstractTableModel):
     def reset(self):
         self.beginResetModel()
         self.endResetModel()
+
+    def set_rows_to_load(self, rows_to_load):
+        self.ROWS_TO_LOAD = rows_to_load
+
+    def set_cols_to_load(self, cols_to_load):
+        self.COLS_TO_LOAD = cols_to_load
 
 
 class DataFrameView(QTableView):
@@ -709,6 +696,39 @@ class DataFrameView(QTableView):
             self.sig_fetch_more_columns.emit()
         if columns:
             self.sig_resize_columns.emit()
+
+    def keyPressEvent(self, event):
+        modifiers = QApplication.keyboardModifiers()
+        # if pressed control
+        if modifiers == Qt.ControlModifier:
+            current_row = self.selectionModel().currentIndex().row()
+            current_col = self.selectionModel().currentIndex().column()
+            if event.key() == Qt.Key_Up:
+                self.scroll_to_and_select(0, current_col)
+            if event.key() == Qt.Key_Left:
+                self.scroll_to_and_select(current_row, 0)
+            if event.key() == Qt.Key_Down:
+                num_rows = self.model().total_rows
+                self.model().set_rows_to_load(num_rows)
+                self.model().fetch_more(rows=True)
+                # let the view updated
+                QApplication.processEvents()
+                self.scroll_to_and_select(max(num_rows - 1, 0), current_col)
+            if event.key() == Qt.Key_Right:
+                num_cols = self.model().total_cols
+                self.model().set_cols_to_load(num_cols)
+                self.model().fetch_more(rows=True)
+                # let the view updated
+                QApplication.processEvents()
+                self.scroll_to_and_select(current_row, max(num_cols - 1, 0))
+            if event.key() in [Qt.Key_Up, Qt.Key_Left, Qt.Key_Down, Qt.Key_Right]:
+                # override original implementation
+                return
+        super(DataFrameView, self).keyPressEvent(event)
+
+    def scroll_to_and_select(self, y, x):
+        self.scrollTo(self.model().index(y, x))
+        self.selectionModel().setCurrentIndex(self.model().index(y, x), QItemSelectionModel.ClearAndSelect)
 
     def sortByColumn(self, index):
         """Implement a column sort."""
@@ -805,15 +825,15 @@ class DataFrameHeaderModel(QAbstractTableModel):
         if self.axis == 0:
             self.total_cols = self.model.shape[1]
             self._shape = (self.model.header_shape[0], self.model.shape[1])
-            if self.total_cols > LARGE_COLS:
-                self.cols_loaded = COLS_TO_LOAD
+            if self.total_cols > self.model.LARGE_COLS:
+                self.cols_loaded = self.model.COLS_TO_LOAD
             else:
                 self.cols_loaded = self.total_cols
         else:
             self.total_rows = self.model.shape[0]
             self._shape = (self.model.shape[0], self.model.header_shape[1])
-            if self.total_rows > LARGE_NROWS:
-                self.rows_loaded = ROWS_TO_LOAD
+            if self.total_rows > self.model.LARGE_NROWS:
+                self.rows_loaded = self.model.ROWS_TO_LOAD
             else:
                 self.rows_loaded = self.total_rows
 
@@ -841,14 +861,14 @@ class DataFrameHeaderModel(QAbstractTableModel):
         """Get more columns or rows (based on axis)."""
         if self.axis == 1 and self.total_rows > self.rows_loaded:
             reminder = self.total_rows - self.rows_loaded
-            items_to_fetch = min(reminder, ROWS_TO_LOAD)
+            items_to_fetch = min(reminder, self.model.ROWS_TO_LOAD)
             self.beginInsertRows(QModelIndex(), self.rows_loaded,
                                  self.rows_loaded + items_to_fetch - 1)
             self.rows_loaded += items_to_fetch
             self.endInsertRows()
         if self.axis == 0 and self.total_cols > self.cols_loaded:
             reminder = self.total_cols - self.cols_loaded
-            items_to_fetch = min(reminder, COLS_TO_LOAD)
+            items_to_fetch = min(reminder, self.model.COLS_TO_LOAD)
             self.beginInsertColumns(QModelIndex(), self.cols_loaded,
                                     self.cols_loaded + items_to_fetch - 1)
             self.cols_loaded += items_to_fetch
@@ -1164,7 +1184,7 @@ class DataFrameEditor(QDialog):
         # original (default)
         # would cause funny behaviour if calling QheaderView and self.table_header.horizontalHeader at the same time
         # custom_header_view = QHeaderView(Qt.Horizontal,self.table_header)
-        self.custom_header_view = FilterHeader(self.table_header)
+        self.custom_header_view = FilterHeaderView(self.table_header)
         # self.custom_header_view = self.table_header.horizontalHeader()
         # needs to set cliackable manually,  not sure what else needs to self manually when creating qheaderview class
         # maybe check value of each field?
@@ -1401,7 +1421,7 @@ class DataFrameEditor(QDialog):
     def keyPressEvent(self, event):
         # This is to block the enter/return key to its parent and exiting the application
         if event.key() == Qt.Key_Enter or event.key() == Qt.Key_Return:
-            pass
+            return
         else:
             super(DataFrameEditor, self).keyPressEvent(event)
 
@@ -1567,6 +1587,8 @@ class DataFrameEditor(QDialog):
 # ==============================================================================
 from spyder.widgets.variableexplorer.originaldataframeeditor import test_edit_original
 from spyder.widgets.variableexplorer.dataframeeditor3x import test_edit_3x
+
+
 def test_edit(data, title="", parent=None):
     """Test subroutine"""
     app = qapplication()  # analysis:ignore
@@ -1622,7 +1644,7 @@ def test():
     df1['Test7'] = df1['Test']
 
     test_wrapper(test_edit, df1, is_profiling=False)
-    test_wrapper(test_edit_original, df1, is_profiling=False)
+    # test_wrapper(test_edit_original, df1, is_profiling=False)
     # test_wrapper(test_edit_3x, df1, is_profiling=False)
 
 
