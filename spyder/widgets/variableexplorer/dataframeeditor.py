@@ -1177,8 +1177,15 @@ class DataFrameEditor(QDialog):
 
     def create_table_header(self):
         """Create the QTableView that will hold the header model."""
-        # Only middle part was actually edited
         self.table_header = QTableView()
+        self.custom_header_view = FilterHeaderView(self.table_header)
+        # needs to set cliackable manually,  not sure what else needs to self manually when creating qheaderview class
+        # maybe check value of each field?
+        # https://github.com/spyder-ide/qtpy/blob/master/qtpy/tests/test_patch_qheaderview.py
+        self.custom_header_view.setSectionsClickable(True)
+        self.table_header.setHorizontalHeader(self.custom_header_view)
+        self.table_header.horizontalHeader().sectionResized.connect(self._column_resized)
+        # follow original implementaions
         self.table_header.verticalHeader().hide()
         self.table_header.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table_header.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -1187,15 +1194,6 @@ class DataFrameEditor(QDialog):
         self.table_header.setHorizontalScrollBar(self.hscroll)
         self.table_header.setFrameStyle(QFrame.Plain)
         self.table_header.setItemDelegate(QItemDelegate())
-        # custom edit start here
-        self.custom_header_view = FilterHeaderView(self.table_header)
-        # needs to set cliackable manually,  not sure what else needs to self manually when creating qheaderview class
-        # maybe check value of each field?
-        # https://github.com/spyder-ide/qtpy/blob/master/qtpy/tests/test_patch_qheaderview.py
-        self.custom_header_view.setSectionsClickable(True)
-        self.table_header.setHorizontalHeader(self.custom_header_view)
-        # custom edit end
-        self.table_header.horizontalHeader().sectionResized.connect(self._column_resized)
         self.layout.addWidget(self.table_header, 0, 1)
 
     def create_table_index(self):
