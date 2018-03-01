@@ -1178,6 +1178,12 @@ class DataFrameEditor(QDialog):
     def create_table_header(self):
         """Create the QTableView that will hold the header model."""
         self.table_header = QTableView()
+        # move all the scroll bar related settings here
+        # set here as custom_header_view uses scrollbar in table_header
+        self.table_header.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.table_header.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.table_header.setHorizontalScrollMode(QTableView.ScrollPerPixel)
+        self.table_header.setHorizontalScrollBar(self.hscroll)
         self.custom_header_view = FilterHeaderView(self.table_header)
         # needs to set cliackable manually,  not sure what else needs to self manually when creating qheaderview class
         # maybe check value of each field?
@@ -1185,13 +1191,9 @@ class DataFrameEditor(QDialog):
         self.custom_header_view.setSectionsClickable(True)
         self.table_header.setHorizontalHeader(self.custom_header_view)
         self.table_header.horizontalHeader().sectionResized.connect(self._column_resized)
-        # follow original implementaions
+        # the rest are defaults
         self.table_header.verticalHeader().hide()
         self.table_header.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table_header.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.table_header.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.table_header.setHorizontalScrollMode(QTableView.ScrollPerPixel)
-        self.table_header.setHorizontalScrollBar(self.hscroll)
         self.table_header.setFrameStyle(QFrame.Plain)
         self.table_header.setItemDelegate(QItemDelegate())
         self.layout.addWidget(self.table_header, 0, 1)
