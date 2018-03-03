@@ -417,7 +417,7 @@ class DataFrameModel(QAbstractTableModel):
                 else:
                     filter = 'self.original_df["{}"]'.format(column_name) + filter
                 query_list.append('({})'.format(filter))
-        query_text = 'and '.join(query_list)
+        query_text = '& '.join(query_list)
         # TODO: support startswith
         print(query_text)
         if query_text == '':
