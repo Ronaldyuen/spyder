@@ -718,7 +718,7 @@ class DataFrameView(QTableView):
             if event.key() == Qt.Key_Right:
                 num_cols = self.model().total_cols
                 self.model().set_cols_to_load(num_cols)
-                self.model().fetch_more(cols=True)
+                self.model().fetch_more(columns=True)
                 # let the view updated
                 QApplication.processEvents()
                 self.scroll_to_and_select(current_row, max(num_cols - 1, 0))
