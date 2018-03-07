@@ -233,10 +233,12 @@ class DataFrameModel(QAbstractTableModel):
         # model loading values
         # Limit at which dataframe is considered so large that it is loaded on demand
         self.LARGE_SIZE = 5e5
+        # self.LARGE_SIZE = 5e6
         self.LARGE_NROWS = 1e5
         self.LARGE_COLS = 60
         self.ROWS_TO_LOAD = 500
         self.COLS_TO_LOAD = 40
+        self.UNIQUE_ITEM_THRESHOLD = 15
 
         QAbstractTableModel.__init__(self)
         self.dialog = parent
@@ -253,6 +255,7 @@ class DataFrameModel(QAbstractTableModel):
 
         self.max_min_col = None
         if size < self.LARGE_SIZE:
+            self.unique_col_update()
             self.max_min_col_update()
             self.colum_avg_enabled = True
             self.bgcolor_enabled = True
@@ -328,6 +331,25 @@ class DataFrameModel(QAbstractTableModel):
         if ax.name:
             return ax.name
 
+    # TODO: with this logic, we should disable global min max
+    # always run this before max min
+    def unique_col_update(self):
+        """try to find the number of unique items in a column and store the set of items in unique_items_col"""
+        if self.df.shape[0] == 0:  # If no rows to compute max/min then return
+            return
+        self.unique_items_col = []
+        for _, col in self.df.iteritems():
+            try:
+                unique_items = sorted(set(col))
+                # check # unique items, set if value is less than threshold
+                if len(unique_items) < self.UNIQUE_ITEM_THRESHOLD:
+                    self.unique_items_col.append([i for i in unique_items])
+                    continue
+            # error when items in col is not hashable
+            except TypeError:
+                pass
+            self.unique_items_col.append(None)
+
     def max_min_col_update(self):
         """
         Determines the maximum and minimum number in each column.
@@ -340,14 +362,10 @@ class DataFrameModel(QAbstractTableModel):
         is set to None. If the dtype is complex, then compute the maximum and
         minimum of the absolute values. If vmax equals vmin, then vmin is 
         decreased by one.
-
-        Added String Min Max
         """
         if self.df.shape[0] == 0:  # If no rows to compute max/min then return
             return
         self.max_min_col = []
-        self.unique_items_col = [None] * self.df.shape[1]
-        # loop by column
         for idx, (_, col) in enumerate(self.df.iteritems()):
             if col.dtype in REAL_NUMBER_TYPES:
                 vmax = col.max(skipna=True)
@@ -355,26 +373,19 @@ class DataFrameModel(QAbstractTableModel):
             elif col.dtype in COMPLEX_NUMBER_TYPES:
                 vmax = col.abs().max(skipna=True)
                 vmin = col.abs().min(skipna=True)
-            # for other objects, check # unique items, if value is greater than threshold, set as None
-            # otherwise, add a list of unique items to self.unique_items
             else:
-                try:
-                    unique_items = sorted(set(col))
-                # when items in col is not hashable
-                except TypeError:
-                    self.max_min_col.append(None)
-                    continue
-                if len(unique_items) < 15:
-                    vmax = len(unique_items) - 1
+                # check unique items
+                if self.unique_items_col[idx]:
+                    vmax = len(self.unique_items_col[idx]) - 1
                     vmin = 0
-                    self.unique_items_col[idx] = [i for i in unique_items]
                 else:
                     self.max_min_col.append(None)
                     continue
             if vmax != vmin:
                 max_min = [vmax, vmin]
             else:
-                max_min = [vmax, vmin - 1]
+                # set None so no coloring when whole column has the same value
+                max_min = None
             self.max_min_col.append(max_min)
 
     def get_format(self):
@@ -458,6 +469,7 @@ class DataFrameModel(QAbstractTableModel):
             # other objects, just like int
             else:
                 color_func = float
+                # transform the value to index of unique items
                 value = self.unique_items_col[column].index(value)
             # self.return_max returns global max or column max
             vmax, vmin = self.return_max(self.max_min_col, column)
@@ -595,6 +607,7 @@ class DataFrameModel(QAbstractTableModel):
                                      "Editing dtype {0!s} not yet supported."
                                      .format(type(current_value).__name__))
                 return False
+        self.unique_col_update()
         self.max_min_col_update()
         return True
 
@@ -1625,7 +1638,8 @@ def test():
     df1['Test3'] = df1['Test']
     df1['Test4'] = df1['Test']
     df1['Test5'] = df1['Test']
-    df1['Test6'] = df1['Test']
+    df1['Test6'] = "Test"
+    df1['Test7'] = 5
     df1 = df1.join([DataFrame([r.choice(true_false_list) for _ in range(nrow)], columns=['true_false_list'])])
     df1 = df1.join([DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list_2'])])
     df1 = df1.join([DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list_3'])])
@@ -1633,7 +1647,7 @@ def test():
     df1.loc[1, 'a'] = float('nan')
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
     df1 = df1.join([DataFrame([{'F': [1, 2, 3, 4]}])])
-    df1['Test7'] = df1['Test']
+    df1['Test8'] = df1['Test']
 
     test_wrapper(test_edit, df1, is_profiling=False)
     # test_wrapper(test_edit_original, df1, is_profiling=False)
