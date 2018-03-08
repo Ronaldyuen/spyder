@@ -343,7 +343,7 @@ class DataFrameModel(QAbstractTableModel):
                 unique_items = sorted(set(col))
                 # check # unique items, set if value is less than threshold
                 if len(unique_items) < self.UNIQUE_ITEM_THRESHOLD:
-                    self.unique_items_col.append([i for i in unique_items])
+                    self.unique_items_col.append(unique_items)
                     continue
             # error when items in col is not hashable
             except TypeError:
@@ -367,6 +367,11 @@ class DataFrameModel(QAbstractTableModel):
             return
         self.max_min_col = []
         for idx, (_, col) in enumerate(self.df.iteritems()):
+            if self.unique_items_col[idx]:
+                # ignore the columns with the same value, otherwise color
+                if len(self.unique_items_col[idx]) == 1:
+                    self.max_min_col.append(None)
+                    continue
             if col.dtype in REAL_NUMBER_TYPES:
                 vmax = col.max(skipna=True)
                 vmin = col.min(skipna=True)
@@ -384,8 +389,8 @@ class DataFrameModel(QAbstractTableModel):
             if vmax != vmin:
                 max_min = [vmax, vmin]
             else:
-                # set None so no coloring when whole column has the same value
-                max_min = None
+                # reach here because of the case of self.unique_items_col[idx] = [x,nan], and min(skipna=True) = max(skipna=True)
+                max_min = [vmax, vmin - 1]
             self.max_min_col.append(max_min)
 
     def get_format(self):
@@ -1634,7 +1639,8 @@ def test():
     nrow = 100000
     r = random.Random(502)
     df1 = DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['Test'])
-    df1['Test2'] = df1['Test']
+    df1['Test2'] = 1
+    df1.loc[1, 'Test2'] = float('nan')
     df1['Test3'] = df1['Test']
     df1['Test4'] = df1['Test']
     df1['Test5'] = df1['Test']
