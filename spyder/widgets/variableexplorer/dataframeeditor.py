@@ -73,8 +73,8 @@ from qtpy.QtWidgets import (QApplication, QCheckBox, QDialogButtonBox, QDialog,
                             QGridLayout, QHBoxLayout, QInputDialog, QLineEdit,
                             QMenu, QMessageBox, QPushButton, QTableView,
                             QScrollBar, QTableWidget, QFrame,
-                            QItemDelegate, QHeaderView)
-from PyQt5.QtCore import pyqtSignal
+                            QItemDelegate, QHeaderView, QLabel)
+from PyQt5.QtCore import pyqtSignal, QRect
 from pandas import DataFrame, Index, Series
 
 try:
@@ -114,91 +114,170 @@ BACKGROUND_NONNUMBER_COLOR = Qt.lightGray
 BACKGROUND_INDEX_ALPHA = 0.8
 BACKGROUND_STRING_ALPHA = 0.05
 BACKGROUND_MISC_ALPHA = 0.3
+""" API Function dictionary
+sizeHint: The default implementation of sizeHint() returns an invalid size if there is no layout for this widget
+          and returns the layout's preferred size otherwise.
+updateGeometries: Updates the geometry of the child widgets of the view. called when sizeHint etc. is called
+setViewportMargins: Sets the margins around the scrolling area to left, top, right and bottom. (for locked rows and columns)
+sectionPosition: first visible item's top-left corner to the top-left corner of the item with logicalIndex
+offset: header's left most visible pixel position
+"""
+
+""" Layout workflow:
+1. setup_and_check (initialization)
+    1.1 setModel (setting the model, also used by sorting and filtering )
+        _update_layout 
+            setFixedHeight/setFixedWidth for level, index and header using sizeHint, rowViewportPosition etc
+            _resizeVisibleColumnsToContents (resize the columns in view) 
+                _resizeColumnToContents (set column width)
+                    _sizeHintForColumn/sizeHintForIndex
+                    setColumnWidth (on header)
+                    
+    *********REMOVED********
+    1.2 resizeColumnsToContents 
+        1.2.1. _resizeColumnsToContents (on index only), 
+        _update_layout
+        table_level.resizeColumnsToContents (call API)
+   **********REMOVED********
+   **********ADDED********** 
+    1.3 resizeIndexColumn
+        table_level.setColumnWidth
+        _update_layout()
+    **********ADDED**********
+    
+2. eventFilter (receive event of obj == self.dataTable and event.type() == QEvent.Resize )(called for any resize event)
+    _resizeVisibleColumnsToContents 
+"""
+
+""" Layout related problem 
+Problem 1: 
+    Non-resized columns outside of initial view: 
+    When scroll to and click on a column that was not in view initially,
+    it resizes and causing the view to shift unwantedly.
+Reason: 
+    _resizeVisibleColumnsToContents resize only visible columns,
+    sel_model.currentColumnChanged.connect(self._resizeCurrentColumnToContents) resizes on click
+Solution:
+    connect scroll bar with signal sig_resize_columns and _resizeVisibleColumnsToContents
+
+Problem 2:
+    Vertical scroll:
+    Scrolling down the dataframe, the table view shows empty table for data beyond rows.loaded, until the scroll
+    reaches the bottom then triggered load_more_data unexpectedly...
+    This problem raised from multiple places that should not have affected it, changes from customheaderview, _update_layout, etc. 
+Reason:
+    Unknown  
+Solution:
+    by calling QApplication.processEvents() in setup_and_check 
+    (Processes all pending events for the calling thread according to the specified flags until there are no more events to process.)
+
+Problem 3:
+    index column not resized properly
+Reason:
+    original _resizeColumnsToContents resizes based on contents from index and level. (we want to also resize it with customheader)
+    Additionally, not all of the data was loaded to the view, so large index number was not used for resizing purpose 
+Solution:
+    In setup_and_check we call resizeIndexColumn which will call setColumnWidth based on header width 
+"""
+
+############## Custom Header ########################
+"""
+This part creates a custom header build on top of the original QHeaderView
+It includes:
+1. For each column in data table, create an editor for filtering purpose 
+2. For the index/level, a label which shows number of columns of the data table
+Both of these would be right below column name/index name and should be aligned with them 
+"""
 
 
-# Adding filters on top of the header
 # Source: https://stackoverflow.com/questions/44343738/how-to-inject-widgets-between-qheaderview-and-qtableview
-class FilterHeaderView(QHeaderView):
-    filterActivated = pyqtSignal()
-
+class CustomHeaderView(QHeaderView):
     def __init__(self, parent):
         super().__init__(Qt.Horizontal, parent)
-        self._editors = []
-        self._padding = 4
-        # the last visible section in the header takes up all the available space
-        # self.setStretchLastSection(True)
-        # OLD: self.setResizeMode(QtGui.QHeaderView.Stretch)
-        # self.setSectionResizeMode(QHeaderView.Stretch)
-        # self.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.setSortIndicatorShown(False)
-        # when section is resized, this signal is emitted
-        self.sectionResized.connect(self.adjustPositions)
-        parent.horizontalScrollBar().valueChanged.connect(self.adjustPositions)
+        self._is_initialized = False
+        self.CUSTOM_HEADER_HEIGHT = 22
 
-    def setFilterBoxes(self, count):
-        # create only once
-        if not self._editors:
-            for index in range(count):
-                editor = QLineEdit(self.parent())
-                editor.setPlaceholderText(str(index))
-                editor.returnPressed.connect(self.filterActivated.emit)
-                self._editors.append(editor)
-        self.adjustPositions()
-
-    # This property holds the recommended size
     def sizeHint(self):
         size = super().sizeHint()
-        if self._editors:
-            height = self._editors[0].sizeHint().height()
-            size.setHeight(size.height() + height + self._padding)
+        if self._is_initialized:
+            size.setHeight(size.height() + self.CUSTOM_HEADER_HEIGHT)
         return size
 
-    # Updates the geometry of the child widgets of the view.
-    # called when sizeHint etc. is called
     def updateGeometries(self):
-        if self._editors:
-            height = self._editors[0].sizeHint().height()
-            # set margin (add space for lineedit to insert there), last parameter is bottom margin
-            self.setViewportMargins(0, 0, 0, height + self._padding)
-            # self.setViewportMargins(0, 0, 0, 100)
+        if self._is_initialized:
+            self.setViewportMargins(0, 0, 0, self.CUSTOM_HEADER_HEIGHT)
         else:
             self.setViewportMargins(0, 0, 0, 0)
         super().updateGeometries()
         self.adjustPositions()
 
+
+class CustomHeaderViewIndex(CustomHeaderView):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._label = None
+        self.sectionResized.connect(self.adjustPositions)
+
+    def setQLabel(self, text):
+        if not self._is_initialized:
+            self._is_initialized = True
+            self._label = QLabel(self.parent())
+            self._label.setStyleSheet('color: blue')
+            self.adjustPositions()
+        self._label.setText(text)
+
+    def adjustPositions(self):
+        if self._is_initialized:
+            x = self.sectionPosition(0) - self.offset()
+            # check the original header height
+            y = super(CustomHeaderView, self).sizeHint().height()
+            self._label.setGeometry(QRect(x, y, self.sectionSize(0), self.CUSTOM_HEADER_HEIGHT))
+
+    def sizeHint(self):
+        size = super().sizeHint()
+        if self._is_initialized:
+            label_width = self._label.sizeHint().width()
+            size.setWidth(label_width)
+        return size
+
+
+class CustomHeaderViewEditor(CustomHeaderView):
+    filterActivated = pyqtSignal()
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._editors = []
+        self.sectionResized.connect(self.adjustPositions)
+        parent.horizontalScrollBar().valueChanged.connect(self.adjustPositions)
+
     # connected with sectionResized and horizontalScrollBar
     def adjustPositions(self):
         for index, editor in enumerate(self._editors):
-            height = editor.sizeHint().height()
-            # maybe this +2 is not needed?
-            # x = self.sectionPosition(index) - self.offset() + 2
-            # sectionPosition: first visible item's top-left corner to the top-left corner of the item with logicalIndex.
-            # sectionPosition = 0 in default position
             # offset: header's left most visible pixel position
             x = self.sectionPosition(index) - self.offset()
             # check the original header height
-            y = super().sizeHint().height()
+            y = super(CustomHeaderView, self).sizeHint().height()
             # move to x,y position
             # coordinates is left and top most of the structure
             editor.move(x, y)
-            editor.resize(self.sectionSize(index), height)
+            editor.resize(self.sectionSize(index), self.CUSTOM_HEADER_HEIGHT)
 
-    def filterText(self, index):
-        if 0 <= index < len(self._editors):
-            return self._editors[index].text()
-        return ''
+    def setFilterBoxes(self, count):
+        # create only once
+        if not self._is_initialized:
+            for index in range(count):
+                editor = QLineEdit(self.parent())
+                editor.setPlaceholderText(str(index))
+                editor.returnPressed.connect(self.filterActivated.emit)
+                self._editors.append(editor)
+            self._is_initialized = True
+            self.adjustPositions()
 
     def getText(self):
         return [self._editors[index].text() for index in range(0, len(self._editors))]
 
-    def setFilterText(self, index, text):
-        if 0 <= index < len(self._editors):
-            self._editors[index].setText(text)
 
-    def clearFilters(self):
-        for editor in self._editors:
-            editor.clear()
-
+############## Custom Header ########################
 
 def bool_false_check(value):
     """
@@ -231,7 +310,7 @@ class DataFrameModel(QAbstractTableModel):
 
     def __init__(self, dataFrame, format=DEFAULT_FORMAT, parent=None):
         # model loading values
-        # Limit at which dataframe is considered so large that it is loaded on demand
+        # Limit at which dataframe is considered large and it is loaded on demand
         self.LARGE_SIZE = 5e5
         # self.LARGE_SIZE = 5e6
         self.LARGE_NROWS = 1e5
@@ -580,6 +659,7 @@ class DataFrameModel(QAbstractTableModel):
                             Qt.ItemIsEditable)
 
     def setData(self, index, value, role=Qt.EditRole, change_type=None):
+        # TODO: this is the set data entrance, debug this
         """Cell content change"""
         column = index.column()
         row = index.row()
@@ -730,14 +810,14 @@ class DataFrameView(QTableView):
                 num_rows = self.model().total_rows
                 self.model().set_rows_to_load(num_rows)
                 self.model().fetch_more(rows=True)
-                # let the view updated
+                # let the view update
                 QApplication.processEvents()
                 self.scroll_to_and_select(max(num_rows - 1, 0), current_col)
             if event.key() == Qt.Key_Right:
                 num_cols = self.model().total_cols
                 self.model().set_cols_to_load(num_cols)
                 self.model().fetch_more(columns=True)
-                # let the view updated
+                # let the view update
                 QApplication.processEvents()
                 self.scroll_to_and_select(current_row, max(num_cols - 1, 0))
             if event.key() in [Qt.Key_Up, Qt.Key_Left, Qt.Key_Down, Qt.Key_Right]:
@@ -1171,9 +1251,9 @@ class DataFrameEditor(QDialog):
         btn_layout.addWidget(bbox)
         btn_layout.setContentsMargins(4, 4, 4, 4)
         self.layout.addLayout(btn_layout, 4, 0, 1, 2)
-        self.setModel(self.dataModel)
-        self.resizeColumnsToContents()
-
+        self.setModel(self.dataModel, relayout=True)
+        self.resizeIndexColumn()
+        QApplication.processEvents()
         return True
 
     def create_table_level(self):
@@ -1183,6 +1263,9 @@ class DataFrameEditor(QDialog):
         self.table_level.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.table_level.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.table_level.setFrameStyle(QFrame.Plain)
+        self.custom_label_view = CustomHeaderViewIndex(self.table_level)
+        self.custom_label_view.setSectionsClickable(True)
+        self.table_level.setHorizontalHeader(self.custom_label_view)
         self.table_level.horizontalHeader().sectionResized.connect(
             self._index_resized)
         self.table_level.verticalHeader().sectionResized.connect(
@@ -1202,7 +1285,7 @@ class DataFrameEditor(QDialog):
         self.table_header.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.table_header.setHorizontalScrollMode(QTableView.ScrollPerPixel)
         self.table_header.setHorizontalScrollBar(self.hscroll)
-        self.custom_header_view = FilterHeaderView(self.table_header)
+        self.custom_header_view = CustomHeaderViewEditor(self.table_header)
         # needs to set cliackable manually,  not sure what else needs to self manually when creating qheaderview class
         # maybe check value of each field?
         # https://github.com/spyder-ide/qtpy/blob/master/qtpy/tests/test_patch_qheaderview.py
@@ -1283,7 +1366,7 @@ class DataFrameEditor(QDialog):
         self.table_header.setRowHeight(row, new_height)
         self._update_layout()
 
-    # the width and height of level, index and header are reset here
+    # the width and height of level, index and header are fixed here
     def _update_layout(self):
         """Set the width and height of the QTableViews and hide rows."""
         h_width = max(self.table_level.verticalHeader().sizeHint().width(),
@@ -1293,22 +1376,19 @@ class DataFrameEditor(QDialog):
 
         # self._model.header_shape = number of levels in header and index, last_row is 0 in a normal dataframe
         last_row = self._model.header_shape[0] - 1
-        _editor_height = self.custom_header_view._editors[0].sizeHint().height() if self.custom_header_view._editors else 0
         if last_row < 0:
             hdr_height = self.table_level.horizontalHeader().height()
         else:
             hdr_height = self.table_level.rowViewportPosition(last_row) + \
                          self.table_level.rowHeight(last_row) + \
-                         self.table_level.horizontalHeader().height() + \
-                         _editor_height
+                         self.table_level.horizontalHeader().height()
 
             # Check if the header shape has only one row (which display the
             # same info than the horizontal header).
             if last_row == 0:
-                # not sure what this does
+                # This is to hide the empty data table of table_level and table_header?
                 self.table_level.setRowHidden(0, True)
                 self.table_header.setRowHidden(0, True)
-        logger.info("hdr:{}".format(hdr_height))
         self.table_header.setFixedHeight(hdr_height)
         self.table_level.setFixedHeight(hdr_height)
 
@@ -1319,7 +1399,6 @@ class DataFrameEditor(QDialog):
             idx_width = self.table_level.columnViewportPosition(last_col) + \
                         self.table_level.columnWidth(last_col) + \
                         self.table_level.verticalHeader().width()
-        # logger.info("Index and level width:" + str(idx_width))
         self.table_index.setFixedWidth(idx_width)
         self.table_level.setFixedWidth(idx_width)
         self._resizeVisibleColumnsToContents()
@@ -1338,10 +1417,11 @@ class DataFrameEditor(QDialog):
     def setModel(self, model, relayout=True):
         """Set the model for the data, header/index and level views."""
         self._model = model
-        sel_model = self.dataTable.selectionModel()
-        # not sure what this does
-        sel_model.currentColumnChanged.connect(
-            self._resizeCurrentColumnToContents)
+        # The original behavior is to resize column only when selected (clicked)
+        # We have changed this to resize when in view
+        # sel_model = self.dataTable.selectionModel()
+        # sel_model.currentColumnChanged.connect(
+        #     self._resizeCurrentColumnToContents)
 
         # Asociate the models (level, vertical index and horizontal header)
         # with its corresponding view.
@@ -1357,15 +1437,17 @@ class DataFrameEditor(QDialog):
             1,
             self.palette()))
 
+        # setting the custom header
+        if self._model.shape[1] > 0:
+            self.custom_header_view.setFilterBoxes(self._model.shape[1])
+            self.custom_label_view.setQLabel(str(self._model.shape[0]))
+        # set signal once only
+        if self.custom_header_view.receivers(self.custom_header_view.filterActivated) == 0:
+            self.custom_header_view.filterActivated.connect(self.handleFilterActivated)
+
         # Needs to be called after setting all table models
         if relayout:
             self._update_layout()
-
-        # after set model, set filter box
-        self.custom_header_view.setFilterBoxes(self._model.shape[1])
-        # connect to handler when initialized
-        if self.custom_header_view.receivers(self.custom_header_view.filterActivated) == 0:
-            self.custom_header_view.filterActivated.connect(self.handleFilterActivated)
 
     def setCurrentIndex(self, y, x):
         """Set current selection."""
@@ -1373,10 +1455,15 @@ class DataFrameEditor(QDialog):
             self.dataTable.model().index(y, x),
             QItemSelectionModel.ClearAndSelect)
 
-    # This function tried to find the maximum width for each column, by looking at the width of all the rows
-    # theres a time limit for this function, but the default is set to zero
     def _sizeHintForColumn(self, table, col, limit_ms=None):
         """Get the size hint for a given column in a table."""
+        """
+        This function tries to find the maximum width for each column, by checking the width of each cell
+        theres a time limit for this function, default is None
+        Note that the data does not equal the full data (depends on the the data loaded to the table view).
+        table: QTableView
+        col: int
+        """
         max_row = table.model().rowCount()
         lm_start = time.clock()
         lm_row = 64 if limit_ms else max_row
@@ -1406,8 +1493,9 @@ class DataFrameEditor(QDialog):
         # logger.info("col:" + str(col) + "width:" + str(width))
         header.setColumnWidth(col, width)
 
+    # This is called by table index only
     def _resizeColumnsToContents(self, header, data, limit_ms):
-        """Resize all the colummns"""
+        """Resize all the columns in data"""
         max_col = data.model().columnCount()
         if limit_ms is None:
             max_col_ms = None
@@ -1416,16 +1504,16 @@ class DataFrameEditor(QDialog):
         for col in range(max_col):
             self._resizeColumnToContents(header, data, col, max_col_ms)
 
-            # resize event handled here
-
     def eventFilter(self, obj, event):
         """Override eventFilter to catch resize event."""
         # from installeventfilter, dataframeeditor receive all events from dataTable(DataFrameView)
         # the events received are catched by this function and only act on it when it is resize
         if obj == self.dataTable and event.type() == QEvent.Resize:
-            # This fix layout problems
-            self._update_layout()
-            # self._resizeVisibleColumnsToContents()
+            # Tried calling _update_layout() before
+            # which would reset the width/height of header and index
+            # Now follows the original implementation
+            # self._update_layout()
+            self._resizeVisibleColumnsToContents()
         return False
 
     def keyPressEvent(self, event):
@@ -1438,21 +1526,11 @@ class DataFrameEditor(QDialog):
     def _resizeVisibleColumnsToContents(self):
         """Resize the columns that are in the view."""
         """
-        This is a tricky function, initially I wanted to solve the non-resized columns problem:
-        When scroll to and click on a column that was not in view in initialization, it resizes and causing the view to shift unwantedly.
-       
-        By setting 'end = width', this created an unexpected behaviour of row problem:
-        When scroll to some rows > rows_loaded, the data.table does not fetch data,
-        this might be caused by self.horizontalScrollBar().maximum() having different value.
-        
+        By setting 'end = width', this created an unexpected behaviour of row problem as described above:        
         Its unexpected, this function should only setting the width for columns.
-        Further investigations also showed time is also a factor of this behaviour.
+        Further investigations also showed time is also a factor of this behavior.
         Setting breakpoint (slowed down the process) also gave different results.
-        
         Another observation: By setting 'end = end - 1', 'end + 1' works(no rows not loaded issue), setting 'end - 5' does not work.
-        
-        The final solution was to connect the horizontal scroll bar to this function through sig_resize_columns, 
-        it resizes the non-resized columns when the scroll bar is used. This solved both the row and resized problems.  
         """
 
         # decide starting column, ending column and time
@@ -1490,6 +1568,7 @@ class DataFrameEditor(QDialog):
             self._resizeVisibleColumnsToContents()
             self.dataTable.scrollTo(new_index)
 
+    '''This is called by table index only, unused
     def resizeColumnsToContents(self):
         """Resize the columns to its contents."""
         self._autosized_cols = set()
@@ -1497,6 +1576,12 @@ class DataFrameEditor(QDialog):
                                       self.table_index, self._max_autosize_ms)
         self._update_layout()
         self.table_level.resizeColumnsToContents()
+    # '''
+
+    def resizeIndexColumn(self):
+        self._autosized_cols = set()
+        self.table_level.setColumnWidth(0, self.table_level.horizontalHeader().sizeHint().width())
+        self._update_layout()
 
     def change_bgcolor_enable(self, state):
         """
@@ -1541,6 +1626,7 @@ class DataFrameEditor(QDialog):
         else:
             return df
 
+    # only used by resize button
     def _update_header_size(self):
         """Update the column width of the header."""
         column_count = self.table_header.model().columnCount()
