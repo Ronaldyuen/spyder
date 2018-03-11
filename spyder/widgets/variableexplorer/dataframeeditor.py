@@ -195,6 +195,7 @@ class CustomHeaderView(QHeaderView):
     def __init__(self, parent):
         super().__init__(Qt.Horizontal, parent)
         self._is_initialized = False
+        # as QLineEdit().sizeHint().height = 22
         self.CUSTOM_HEADER_HEIGHT = 22
 
     def sizeHint(self):
@@ -653,6 +654,23 @@ class DataFrameModel(QAbstractTableModel):
         self.reset()
         return True
 
+    def find_next_value_same_col(self, cur_row, cur_col, is_direction_up):
+        cur_val = self.get_value(cur_row, cur_col)
+        if is_direction_up:
+            picked_col_series = self.df.iloc[:cur_row, cur_col]
+            if len(picked_col_series) > 0:
+                picked_col = picked_col_series[picked_col_series != cur_val]
+                if len(picked_col) > 0:
+                    return picked_col.index[-1]
+            return 0
+        else:
+            picked_col_series = self.df.iloc[(cur_row + 1):, cur_col]
+            if len(picked_col_series) > 0:
+                picked_col = picked_col_series[picked_col_series != cur_val]
+                if len(picked_col) > 0:
+                    return picked_col.index[0]
+            return self.df.shape[0] - 1
+
     def flags(self, index):
         """Set flags"""
         return Qt.ItemFlags(QAbstractTableModel.flags(self, index) |
@@ -807,27 +825,39 @@ class DataFrameView(QTableView):
             if event.key() == Qt.Key_Left:
                 self.scroll_to_and_select(current_row, 0)
             if event.key() == Qt.Key_Down:
-                num_rows = self.model().total_rows
-                self.model().set_rows_to_load(num_rows)
-                self.model().fetch_more(rows=True)
-                # let the view update
-                QApplication.processEvents()
-                self.scroll_to_and_select(max(num_rows - 1, 0), current_col)
+                self.scroll_to_and_select(self.model().total_rows - 1, current_col)
             if event.key() == Qt.Key_Right:
-                num_cols = self.model().total_cols
-                self.model().set_cols_to_load(num_cols)
-                self.model().fetch_more(columns=True)
-                # let the view update
-                QApplication.processEvents()
-                self.scroll_to_and_select(current_row, max(num_cols - 1, 0))
+                self.scroll_to_and_select(current_row, self.model().total_cols - 1)
             if event.key() in [Qt.Key_Up, Qt.Key_Left, Qt.Key_Down, Qt.Key_Right]:
                 # override original implementation
                 return
+        if modifiers == Qt.AltModifier:
+            current_row = self.selectionModel().currentIndex().row()
+            current_col = self.selectionModel().currentIndex().column()
+            if event.key() == Qt.Key_Up:
+                self.go_to_next_value_same_col(current_row, current_col, True)
+            if event.key() == Qt.Key_Down:
+                self.go_to_next_value_same_col(current_row, current_col, False)
+            if event.key() in [Qt.Key_Up, Qt.Key_Down]:
+                return
         super(DataFrameView, self).keyPressEvent(event)
 
-    def scroll_to_and_select(self, y, x):
-        self.scrollTo(self.model().index(y, x))
-        self.selectionModel().setCurrentIndex(self.model().index(y, x), QItemSelectionModel.ClearAndSelect)
+    def scroll_to_and_select(self, row, col):
+        if row > self.model().rows_loaded:
+            self.model().set_rows_to_load(row)
+            self.model().fetch_more(rows=True)
+        if col > self.model().cols_loaded:
+            self.model().set_cols_to_load(col)
+            self.model().fetch_more(columns=True)
+        # let the view update
+        QApplication.processEvents()
+        self.scrollTo(self.model().index(row, col))
+        self.selectionModel().setCurrentIndex(self.model().index(row, col), QItemSelectionModel.ClearAndSelect)
+
+    def go_to_next_value_same_col(self, cur_row, cur_col, is_direction_up):
+        """scroll to the next item in this column which value is not the same"""
+        row = self.model().find_next_value_same_col(cur_row, cur_col, is_direction_up)
+        self.scroll_to_and_select(row, cur_col)
 
     def sortByColumn(self, index):
         """Implement a column sort."""
@@ -1726,7 +1756,7 @@ def test():
     r = random.Random(502)
     df1 = DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['Test'])
     df1['Test2'] = 1
-    df1.loc[1, 'Test2'] = float('nan')
+    df1.loc[8, 'Test2'] = float('nan')
     df1['Test3'] = df1['Test']
     df1['Test4'] = df1['Test']
     df1['Test5'] = df1['Test']
