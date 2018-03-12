@@ -841,6 +841,7 @@ class DataFrameView(QTableView):
             if event.key() == Qt.Key_Up:
                 self.go_to_next_value_same_col(current_row, current_col, True)
             if event.key() == Qt.Key_Down:
+                # self.scroll_to_and_select(self.model().total_rows - 1, current_col)
                 self.go_to_next_value_same_col(current_row, current_col, False)
             if event.key() in [Qt.Key_Up, Qt.Key_Down]:
                 return
@@ -850,9 +851,11 @@ class DataFrameView(QTableView):
         if row > self.model().rows_loaded:
             self.model().set_rows_to_load(row)
             self.model().fetch_more(rows=True)
+            self.sig_fetch_more_rows.emit()
         if col > self.model().cols_loaded:
             self.model().set_cols_to_load(col)
             self.model().fetch_more(columns=True)
+            self.sig_fetch_more_cols.emit()
         # let the view update
         QApplication.processEvents()
         self.scrollTo(self.model().index(row, col))
