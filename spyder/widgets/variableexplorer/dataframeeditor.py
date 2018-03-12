@@ -82,7 +82,7 @@ try:
 except ImportError:  # For pandas version < 0.20
     from pandas.tslib import OutOfBoundsDatetime
 import numpy as np
-
+import pandas as pd
 # Local imports
 from spyder.config.base import _
 from spyder.config.fonts import DEFAULT_SMALL_DELTA
@@ -656,20 +656,24 @@ class DataFrameModel(QAbstractTableModel):
 
     def find_next_value_same_col(self, cur_row, cur_col, is_direction_up):
         cur_val = self.get_value(cur_row, cur_col)
+        selected_col = self.df.iloc[:, cur_col]
+        np_array = np.array([])
+        if len(selected_col) > 0:
+            # check nan
+            if cur_val != cur_val:
+                np_array = np.where(~pd.isnull(selected_col))[0]
+            else:
+                np_array = np.where(selected_col != cur_val)[0]
         if is_direction_up:
-            picked_col_series = self.df.iloc[:cur_row, cur_col]
-            if len(picked_col_series) > 0:
-                picked_col = picked_col_series[picked_col_series != cur_val]
-                if len(picked_col) > 0:
-                    return picked_col.index[-1]
-            return 0
+            try:
+                return np_array[np_array < cur_row][-1]
+            except IndexError:
+                return 0
         else:
-            picked_col_series = self.df.iloc[(cur_row + 1):, cur_col]
-            if len(picked_col_series) > 0:
-                picked_col = picked_col_series[picked_col_series != cur_val]
-                if len(picked_col) > 0:
-                    return picked_col.index[0]
-            return self.df.shape[0] - 1
+            try:
+                return np_array[np_array > cur_row][0]
+            except IndexError:
+                return self.df.shape[0] - 1
 
     def flags(self, index):
         """Set flags"""
@@ -1762,6 +1766,7 @@ def test():
     df1['Test5'] = df1['Test']
     df1['Test6'] = "Test"
     df1['Test7'] = 5
+    df1.set_index('Test3', inplace=True)
     df1 = df1.join([DataFrame([r.choice(true_false_list) for _ in range(nrow)], columns=['true_false_list'])])
     df1 = df1.join([DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list_2'])])
     df1 = df1.join([DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list_3'])])
