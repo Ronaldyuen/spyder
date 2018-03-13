@@ -135,12 +135,13 @@ offset: header's left most visible pixel position
                     
     *********REMOVED********
     1.2 resizeColumnsToContents 
-        1.2.1. _resizeColumnsToContents (on index only), 
+        _resizeColumnsToContents (on index only)
         _update_layout
         table_level.resizeColumnsToContents (call API)
    **********REMOVED********
    **********ADDED********** 
     1.3 resizeIndexColumn
+        _resizeColumnsToContents (on index only)
         table_level.setColumnWidth
         _update_layout()
     **********ADDED**********
@@ -174,10 +175,10 @@ Solution:
 Problem 3:
     index column not resized properly
 Reason:
-    original _resizeColumnsToContents resizes based on contents from index and level. (we want to also resize it with customheader)
+    original _resizeColumnsToContents resizes based on contents from index and level. (we want to also resize it with customheader which does not belong to contents)
     Additionally, not all of the data was loaded to the view, so large index number was not used for resizing purpose 
 Solution:
-    In setup_and_check we call resizeIndexColumn which will call setColumnWidth based on header width 
+    In setup_and_check we call resizeIndexColumn which will call setColumnWidth based on both the header width and the width of the loaded index 
 """
 
 ############## Custom Header ########################
@@ -224,6 +225,7 @@ class CustomHeaderViewIndex(CustomHeaderView):
             self._is_initialized = True
             self._label = QLabel(self.parent())
             self._label.setStyleSheet('color: blue')
+            self._label.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
             self.adjustPositions()
         self._label.setText(text)
 
@@ -1527,7 +1529,6 @@ class DataFrameEditor(QDialog):
                                                             data_width))
         else:
             width = min(self.max_width, hdr_width)
-        # logger.info("col:" + str(col) + "width:" + str(width))
         header.setColumnWidth(col, width)
 
     # This is called by table index only
@@ -1616,8 +1617,11 @@ class DataFrameEditor(QDialog):
     # '''
 
     def resizeIndexColumn(self):
+        self._resizeColumnsToContents(self.table_level,
+                                      self.table_index, self._max_autosize_ms)
+        width = max(self.table_level.columnWidth(0), self.table_level.horizontalHeader().sizeHint().width())
+        self.table_level.setColumnWidth(0, width)
         self._autosized_cols = set()
-        self.table_level.setColumnWidth(0, self.table_level.horizontalHeader().sizeHint().width())
         self._update_layout()
 
     def change_bgcolor_enable(self, state):
@@ -1769,7 +1773,6 @@ def test():
     df1['Test5'] = df1['Test']
     df1['Test6'] = "Test"
     df1['Test7'] = 5
-    df1.set_index('Test3', inplace=True)
     df1 = df1.join([DataFrame([r.choice(true_false_list) for _ in range(nrow)], columns=['true_false_list'])])
     df1 = df1.join([DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list_2'])])
     df1 = df1.join([DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list_3'])])
@@ -1778,6 +1781,7 @@ def test():
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
     df1 = df1.join([DataFrame([{'F': [1, 2, 3, 4]}])])
     df1['Test8'] = df1['Test']
+    df1.set_index('Test3', inplace=True)
 
     test_wrapper(test_edit, df1, is_profiling=False)
     # test_wrapper(test_edit_original, df1, is_profiling=False)
