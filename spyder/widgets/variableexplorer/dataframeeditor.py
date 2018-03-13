@@ -855,7 +855,7 @@ class DataFrameView(QTableView):
         if col > self.model().cols_loaded:
             self.model().set_cols_to_load(col)
             self.model().fetch_more(columns=True)
-            self.sig_fetch_more_cols.emit()
+            self.sig_fetch_more_columns.emit()
         # let the view update
         QApplication.processEvents()
         self.scrollTo(self.model().index(row, col))
