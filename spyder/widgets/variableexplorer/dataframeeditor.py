@@ -123,7 +123,7 @@ sectionPosition: first visible item's top-left corner to the top-left corner of 
 offset: header's left most visible pixel position
 """
 
-""" Layout workflow:
+""" Layout workflow Original:
 1. setup_and_check (initialization)
     1.1 setModel (setting the model, also used by sorting and filtering )
         _update_layout 
@@ -133,21 +133,22 @@ offset: header's left most visible pixel position
                     _sizeHintForColumn/sizeHintForIndex
                     setColumnWidth (on header)
                     
-    *********REMOVED********
     1.2 resizeColumnsToContents 
         _resizeColumnsToContents (on index only)
         _update_layout
         table_level.resizeColumnsToContents (call API)
-   **********REMOVED********
-   **********ADDED********** 
-    1.3 resizeIndexColumn
-        _resizeColumnsToContents (on index only)
-        table_level.setColumnWidth
-        _update_layout()
-    **********ADDED**********
     
 2. eventFilter (receive event of obj == self.dataTable and event.type() == QEvent.Resize )(called for any resize event)
     _resizeVisibleColumnsToContents 
+
+"""
+"""Layout workflow New:
+- _resizeVisibleColumnsToContents -> _resizeAllColumnsToContents 
+- 1.2 -> 
+    resizeIndexColumn
+        _resizeColumnsToContents (on index only)
+        table_level.setColumnWidth
+        _update_layout()
 """
 
 """ Layout related problem 
@@ -159,7 +160,8 @@ Reason:
     _resizeVisibleColumnsToContents resize only visible columns,
     sel_model.currentColumnChanged.connect(self._resizeCurrentColumnToContents) resizes on click
 Solution:
-    connect scroll bar with signal sig_resize_columns and _resizeVisibleColumnsToContents
+    2018-03-11 connect scroll bar with signal sig_resize_columns and _resizeAllColumnsToContents
+    2018-03-17 Fix COLS_TO_LOAD to load all columns, _resizeVisibleColumnsToContents -> _resizeAllColumnsToContents  
 
 Problem 2:
     Vertical scroll:
@@ -196,7 +198,7 @@ class CustomHeaderView(QHeaderView):
     def __init__(self, parent):
         super().__init__(Qt.Horizontal, parent)
         self._is_initialized = False
-        # as QLineEdit().sizeHint().height = 22
+        # since QLineEdit().sizeHint().height = 22
         self.CUSTOM_HEADER_HEIGHT = 22
 
     def sizeHint(self):
@@ -319,7 +321,7 @@ class DataFrameModel(QAbstractTableModel):
         self.LARGE_NROWS = 1e5
         self.LARGE_COLS = 60
         self.ROWS_TO_LOAD = 500
-        self.COLS_TO_LOAD = 40
+        self.COLS_TO_LOAD = dataFrame.shape[1]
         self.UNIQUE_ITEM_THRESHOLD = 15
 
         QAbstractTableModel.__init__(self)
@@ -785,7 +787,6 @@ class DataFrameView(QTableView):
     sig_sort_by_column = Signal()
     sig_fetch_more_columns = Signal()
     sig_fetch_more_rows = Signal()
-    sig_resize_columns = Signal()
 
     def __init__(self, parent, model, header, hscroll, vscroll):
         """Constructor."""
@@ -814,11 +815,11 @@ class DataFrameView(QTableView):
         if rows and value == self.verticalScrollBar().maximum():
             self.model().fetch_more(rows=rows)
             self.sig_fetch_more_rows.emit()
+        """
         if columns and value == self.horizontalScrollBar().maximum():
             self.model().fetch_more(columns=columns)
             self.sig_fetch_more_columns.emit()
-        if columns:
-            self.sig_resize_columns.emit()
+        """
 
     def keyPressEvent(self, event):
         modifiers = QApplication.keyboardModifiers()
@@ -1372,7 +1373,6 @@ class DataFrameEditor(QDialog):
         self.dataTable.sig_sort_by_column.connect(self._sort_update)
         self.dataTable.sig_fetch_more_columns.connect(self._fetch_more_columns)
         self.dataTable.sig_fetch_more_rows.connect(self._fetch_more_rows)
-        self.dataTable.sig_resize_columns.connect(self._resizeVisibleColumnsToContents)
 
     def sortByIndex(self, index):
         """Implement a Index sort."""
@@ -1413,14 +1413,15 @@ class DataFrameEditor(QDialog):
         self.table_level.verticalHeader().setFixedWidth(h_width)
         self.table_index.verticalHeader().setFixedWidth(h_width)
 
-        # self._model.header_shape = number of levels in header and index, last_row is 0 in a normal dataframe
+        # last_row >= 0 for non empty dataframe
         last_row = self._model.header_shape[0] - 1
         if last_row < 0:
             hdr_height = self.table_level.horizontalHeader().height()
         else:
-            hdr_height = self.table_level.rowViewportPosition(last_row) + \
-                         self.table_level.rowHeight(last_row) + \
-                         self.table_level.horizontalHeader().height()
+            # hdr_height = self.table_level.rowViewportPosition(last_row) + \
+            #              self.table_level.rowHeight(last_row) + \
+            #              self.table_level.horizontalHeader().height()
+            hdr_height = self.custom_header_view.sizeHint().height()
 
             # Check if the header shape has only one row (which display the
             # same info than the horizontal header).
@@ -1440,7 +1441,7 @@ class DataFrameEditor(QDialog):
                         self.table_level.verticalHeader().width()
         self.table_index.setFixedWidth(idx_width)
         self.table_level.setFixedWidth(idx_width)
-        self._resizeVisibleColumnsToContents()
+        self._resizeAllColumnsToContents()
 
     def _reset_model(self, table, model):
         """Set the model in the given table."""
@@ -1551,7 +1552,7 @@ class DataFrameEditor(QDialog):
             # which would reset the width/height of header and index
             # Now follows the original implementation
             # self._update_layout()
-            self._resizeVisibleColumnsToContents()
+            self._resizeAllColumnsToContents()
         return False
 
     def keyPressEvent(self, event):
@@ -1561,49 +1562,42 @@ class DataFrameEditor(QDialog):
         else:
             super(DataFrameEditor, self).keyPressEvent(event)
 
-    def _resizeVisibleColumnsToContents(self):
-        """Resize the columns that are in the view."""
-        """
-        By setting 'end = width', this created an unexpected behaviour of row problem as described above:        
-        Its unexpected, this function should only setting the width for columns.
-        Further investigations also showed time is also a factor of this behavior.
-        Setting breakpoint (slowed down the process) also gave different results.
-        Another observation: By setting 'end = end - 1', 'end + 1' works(no rows not loaded issue), setting 'end - 5' does not work.
-        """
-
+    def _resizeAllColumnsToContents(self):
+        """Resize all columns """
         # decide starting column, ending column and time
         index_column = self.dataTable.rect().topLeft().x()
         start = col = self.dataTable.columnAt(index_column)
         width = self._model.shape[1]
-        end = self.dataTable.columnAt(self.dataTable.rect().bottomRight().x())
-        end = width if end == -1 else end + 1
+        # end = self.dataTable.columnAt(self.dataTable.rect().bottomRight().x())
+        end = width
+        # end = width if end == -1 else end + 1
         if self._max_autosize_ms is None:
             max_col_ms = None
         else:
             max_col_ms = self._max_autosize_ms / max(1, end - start)
         while col < end:
-            resized = False
+            # resized = False
             if col not in self._autosized_cols:
                 self._autosized_cols.add(col)
                 resized = True
                 self._resizeColumnToContents(self.table_header, self.dataTable,
                                              col, max_col_ms)
             col += 1
-            if resized:
-                # As we resize columns, the boundary will change
-                index_column = self.dataTable.rect().bottomRight().x()
-                end = self.dataTable.columnAt(index_column)
-                end = width if end == -1 else end + 1
-                # logger.info("Update end to:" + str(end))
-                if max_col_ms is not None:
-                    max_col_ms = self._max_autosize_ms / max(1, end - start)
+            # if resized:
+            #     # As we resize columns, the boundary will change
+            #     index_column = self.dataTable.rect().bottomRight().x()
+            #     end = self.dataTable.columnAt(index_column)
+            #     end = width if end == -1 else end + 1
+            #     # logger.info("Update end to:" + str(end))
+            #     if max_col_ms is not None:
+            #         max_col_ms = self._max_autosize_ms / max(1, end - start)
 
     # not sure what this does
     def _resizeCurrentColumnToContents(self, new_index, old_index):
         """Resize the current column to its contents."""
         if new_index.column() not in self._autosized_cols:
             # Ensure the requested column is fully into view after resizing
-            self._resizeVisibleColumnsToContents()
+            self._resizeAllColumnsToContents()
             self.dataTable.scrollTo(new_index)
 
     '''This is called by table index only, unused
