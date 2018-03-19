@@ -417,22 +417,19 @@ class DataFrameModel(QAbstractTableModel):
 
     # TODO: with this logic, we should disable global min max
     # always run this before max min
-    def unique_col_update(self):
-        """try to find the number of unique items in a column and store the set of items in unique_items_col"""
+    def unique_col_update(self, col_idx=None):
+        """return list of sorted unique values of each column, None for unhashable values"""
         if self.df.shape[0] == 0:  # If no rows to compute max/min then return
             return
-        self.unique_items_col = []
-        for _, col in self.df.iteritems():
-            try:
-                unique_items = sorted(set(col))
-                # check # unique items, set if value is less than threshold
-                if len(unique_items) < self.UNIQUE_ITEM_THRESHOLD:
-                    self.unique_items_col.append(unique_items)
-                    continue
-            # error when items in col is not hashable
-            except TypeError:
-                pass
-            self.unique_items_col.append(None)
+        self.unique_items_col = [None] * self.df.shape[1]
+        for idx, col in enumerate(self.df):
+            if col_idx is None or (col_idx is not None and col_idx == idx):
+                try:
+                    unique_items = self.df[col].unique()
+                    self.unique_items_col[idx] = sorted(unique_items)
+                # unhashable values
+                except TypeError:
+                    pass
 
     def max_min_col_update(self):
         """
@@ -449,12 +446,13 @@ class DataFrameModel(QAbstractTableModel):
         """
         if self.df.shape[0] == 0:  # If no rows to compute max/min then return
             return
-        self.max_min_col = []
+        self.max_min_col = [None] * self.df.shape[1]
         for idx, (_, col) in enumerate(self.df.iteritems()):
-            if self.unique_items_col[idx]:
-                # ignore the columns with the same value, otherwise color
-                if len(self.unique_items_col[idx]) == 1:
-                    self.max_min_col.append(None)
+            vmax = vmin = None  # set default values
+            unique_items = self.unique_items_col[idx]  # check unique items
+            if unique_items:
+                # set min_max to None (no color) for single value column
+                if len(unique_items) == 1:
                     continue
             if col.dtype in REAL_NUMBER_TYPES:
                 vmax = col.max(skipna=True)
@@ -463,19 +461,17 @@ class DataFrameModel(QAbstractTableModel):
                 vmax = col.abs().max(skipna=True)
                 vmin = col.abs().min(skipna=True)
             else:
-                # check unique items
-                if self.unique_items_col[idx]:
-                    vmax = len(self.unique_items_col[idx]) - 1
-                    vmin = 0
+                if unique_items:
+                    if len(unique_items) < self.UNIQUE_ITEM_THRESHOLD:
+                        vmax = len(unique_items) - 1
+                        vmin = 0
+            if vmax and vmin:
+                if vmax != vmin:
+                    max_min = [vmax, vmin]
                 else:
-                    self.max_min_col.append(None)
-                    continue
-            if vmax != vmin:
-                max_min = [vmax, vmin]
-            else:
-                # reach here because of the case of self.unique_items_col[idx] = [x,nan], and min(skipna=True) = max(skipna=True)
-                max_min = [vmax, vmin - 1]
-            self.max_min_col.append(max_min)
+                    # reach here iff only column only contains one value and nan
+                    max_min = [vmax, vmin - 1]
+                self.max_min_col[idx] = max_min
 
     def get_format(self):
         """Return current format"""
@@ -558,8 +554,11 @@ class DataFrameModel(QAbstractTableModel):
             # other objects, just like int
             else:
                 color_func = float
-                # transform the value to index of unique items
-                value = self.unique_items_col[column].index(value)
+                if self.unique_items_col[column]:
+                    # transform the value to index of unique items
+                    value = self.unique_items_col[column].index(value)
+                else:
+                    return
             # self.return_max returns global max or column max
             vmax, vmin = self.return_max(self.max_min_col, column)
             hue = (BACKGROUND_NUMBER_MINHUE + BACKGROUND_NUMBER_HUERANGE *
@@ -685,7 +684,6 @@ class DataFrameModel(QAbstractTableModel):
                             Qt.ItemIsEditable)
 
     def setData(self, index, value, role=Qt.EditRole, change_type=None):
-        # TODO: this is the set data entrance, debug this
         """Cell content change"""
         column = index.column()
         row = index.row()
@@ -708,7 +706,11 @@ class DataFrameModel(QAbstractTableModel):
             if (isinstance(current_value, supported_types) or
                     is_text_string(current_value)):
                 try:
-                    self.df.iloc[row, column] = current_value.__class__(val)
+                    val_to_set = current_value.__class__(val)
+                    # skip the updating when no changes, also check value is nan
+                    if val_to_set == current_value or ((val_to_set != val_to_set) and (current_value != current_value)):
+                        return True
+                    self.df.iloc[row, column] = val_to_set
                 except (ValueError, OverflowError) as e:
                     QMessageBox.critical(self.dialog, "Error",
                                          str(type(e).__name__) + ": " + str(e))
@@ -718,7 +720,7 @@ class DataFrameModel(QAbstractTableModel):
                                      "Editing dtype {0!s} not yet supported."
                                      .format(type(current_value).__name__))
                 return False
-        self.unique_col_update()
+        self.unique_col_update(col_idx=column)
         self.max_min_col_update()
         return True
 
