@@ -316,8 +316,8 @@ class DataFrameModel(QAbstractTableModel):
     def __init__(self, dataFrame, format=DEFAULT_FORMAT, parent=None):
         # model loading values
         # Limit at which dataframe is considered large and it is loaded on demand
-        self.LARGE_SIZE = 5e5
-        # self.LARGE_SIZE = 5e6
+        # self.LARGE_SIZE = 5e5
+        self.LARGE_SIZE = 5e6
         self.LARGE_NROWS = 1e5
         self.LARGE_COLS = 60
         self.ROWS_TO_LOAD = 500
@@ -465,7 +465,7 @@ class DataFrameModel(QAbstractTableModel):
                     if len(unique_items) < self.UNIQUE_ITEM_THRESHOLD:
                         vmax = len(unique_items) - 1
                         vmin = 0
-            if vmax and vmin:
+            if vmax is not None and vmin is not None:
                 if vmax != vmin:
                     max_min = [vmax, vmin]
                 else:
