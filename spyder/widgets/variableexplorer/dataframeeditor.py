@@ -337,6 +337,7 @@ class DataFrameModel(QAbstractTableModel):
         self.total_cols = self.df.shape[1]
         size = self.total_rows * self.total_cols
 
+        self.unique_items_col = None
         self.max_min_col = None
         if size < self.LARGE_SIZE:
             self.unique_col_update()
@@ -421,7 +422,9 @@ class DataFrameModel(QAbstractTableModel):
         """return list of sorted unique values of each column, None for unhashable values"""
         if self.df.shape[0] == 0:  # If no rows to compute max/min then return
             return
-        self.unique_items_col = [None] * self.df.shape[1]
+        # initialize
+        if self.unique_items_col is None:
+            self.unique_items_col = [None] * self.df.shape[1]
         for idx, col in enumerate(self.df):
             if col_idx is None or (col_idx is not None and col_idx == idx):
                 try:
