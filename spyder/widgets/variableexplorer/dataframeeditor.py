@@ -530,7 +530,7 @@ class DataFrameModel(QAbstractTableModel):
                 print(self.filtered_exec)
                 self.sig_exec_filter.emit()
             except:
-                print("Error in filtering")
+                QMessageBox.critical(self.dialog, _("Error"), traceback.format_exc())
         # reset total rows
         self.total_rows = self.df.shape[0]
         self.reset()
