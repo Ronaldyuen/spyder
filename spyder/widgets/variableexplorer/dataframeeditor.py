@@ -497,7 +497,7 @@ class DataFrameModel(QAbstractTableModel):
             self.return_max = global_max
         self.reset()
 
-    def set_filter(self, filter_list):
+    def set_filter(self, filter_list, df_name):
         # init original df
         if self.original_df is None:
             self.original_df = self.df.copy()
@@ -523,7 +523,7 @@ class DataFrameModel(QAbstractTableModel):
                 exec_text = 'self.df = self.original_df[{}].copy()'.format(query_text)
                 print(exec_text)
                 exec(exec_text)
-                self.filtered_exec = exec_text.replace('self.df', 'df').replace('self.original_df', 'df')
+                self.filtered_exec = exec_text.replace('self.df', df_name).replace('self.original_df', df_name)
                 print(self.filtered_exec)
                 self.sig_exec_filter.emit()
             except:
@@ -1192,6 +1192,8 @@ class DataFrameEditor(QDialog):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(self.layout)
         self.setWindowIcon(ima.icon('arredit'))
+        # title = name of the dataframe in spyder
+        self.df_name = title if title else "df"
         if title:
             title = to_text_string(title) + " - %s" % data.__class__.__name__
         else:
@@ -1700,7 +1702,7 @@ class DataFrameEditor(QDialog):
         QApplication.restoreOverrideCursor()
 
     def set_filter(self, filter_list):
-        self.dataModel.set_filter(filter_list)
+        self.dataModel.set_filter(filter_list, self.df_name)
         self.setModel(self.dataTable.model())
 
     def textbox_return(self):
