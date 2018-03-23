@@ -121,6 +121,8 @@ updateGeometries: Updates the geometry of the child widgets of the view. called 
 setViewportMargins: Sets the margins around the scrolling area to left, top, right and bottom. (for locked rows and columns)
 sectionPosition: first visible item's top-left corner to the top-left corner of the item with logicalIndex
 offset: header's left most visible pixel position
+beginResetModel: When a model is reset it means that any previous data reported from the model is now invalid and has to be queried for again. 
+                This also means that the current item and any selected items will become invalid.
 """
 
 """ Layout workflow Original:
@@ -316,8 +318,8 @@ class DataFrameModel(QAbstractTableModel):
     def __init__(self, dataFrame, format=DEFAULT_FORMAT, parent=None):
         # model loading values
         # Limit at which dataframe is considered large and it is loaded on demand
-        # self.LARGE_SIZE = 5e5
-        self.LARGE_SIZE = 5e6
+        self.LARGE_SIZE = 5e5
+        # self.LARGE_SIZE = 5e6
         self.LARGE_NROWS = 1e5
         self.LARGE_COLS = 60
         self.ROWS_TO_LOAD = 500
@@ -501,6 +503,7 @@ class DataFrameModel(QAbstractTableModel):
         self.reset()
 
     def set_filter(self, filter_list, df_name):
+        """just like sort, modify self.df and then reset"""
         # init original df
         if self.original_df is None:
             self.original_df = self.df.copy()
@@ -1706,7 +1709,6 @@ class DataFrameEditor(QDialog):
 
     def set_filter(self, filter_list):
         self.dataModel.set_filter(filter_list, self.df_name)
-        self.setModel(self.dataTable.model())
 
     def textbox_return(self):
         print(self.textbox.text())
@@ -1782,7 +1784,7 @@ def test():
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
     df1 = df1.join([DataFrame([{'F': [1, 2, 3, 4]}])])
     df1['Test8'] = df1['Test']
-    df1.set_index('Test3', inplace=True)
+    # df1.set_index('Test3', inplace=True)
 
     test_wrapper(test_edit, df1, is_profiling=False)
     # test_wrapper(test_edit_original, df1, is_profiling=False)
