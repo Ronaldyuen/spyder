@@ -318,8 +318,8 @@ class DataFrameModel(QAbstractTableModel):
     def __init__(self, dataFrame, format=DEFAULT_FORMAT, parent=None):
         # model loading values
         # Limit at which dataframe is considered large and it is loaded on demand
-        self.LARGE_SIZE = 5e5
-        # self.LARGE_SIZE = 5e6
+        # self.LARGE_SIZE = 5e5
+        self.LARGE_SIZE = 5e6
         self.LARGE_NROWS = 1e5
         self.LARGE_COLS = 60
         self.ROWS_TO_LOAD = 500
@@ -536,6 +536,9 @@ class DataFrameModel(QAbstractTableModel):
                 QMessageBox.critical(self.dialog, _("Error"), traceback.format_exc())
         # reset total rows
         self.total_rows = self.df.shape[0]
+        # update color after filter
+        self.unique_col_update()
+        self.max_min_col_update()
         self.reset()
 
     # this is the Qmodelindex http://doc.qt.io/qt-5/qmodelindex.html
@@ -1710,13 +1713,12 @@ class DataFrameEditor(QDialog):
     def set_filter(self, filter_list):
         self.dataModel.set_filter(filter_list, self.df_name)
 
+
     def textbox_return(self):
         print(self.textbox.text())
 
     def handleFilterActivated(self):
-        test = self.custom_header_view.getText()
-        print(test)
-        self.set_filter(test)
+        self.set_filter(self.custom_header_view.getText())
 
     def update_exec_filter(self):
         self.textbox.setText(self.dataModel.filtered_exec)
