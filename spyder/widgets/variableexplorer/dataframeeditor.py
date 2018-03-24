@@ -1712,6 +1712,8 @@ class DataFrameEditor(QDialog):
 
     def set_filter(self, filter_list):
         self.dataModel.set_filter(filter_list, self.df_name)
+        # update qlabel text
+        self.custom_label_view.setQLabel(str(self._model.shape[0]))
 
 
     def textbox_return(self):
