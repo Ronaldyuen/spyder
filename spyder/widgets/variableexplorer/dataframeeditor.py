@@ -318,8 +318,8 @@ class DataFrameModel(QAbstractTableModel):
     def __init__(self, dataFrame, format=DEFAULT_FORMAT, parent=None):
         # model loading values
         # Limit at which dataframe is considered large and it is loaded on demand
-        # self.LARGE_SIZE = 5e5
-        self.LARGE_SIZE = 5e6
+        self.LARGE_SIZE = 5e5
+        # self.LARGE_SIZE = 5e6
         self.LARGE_NROWS = 1e5
         self.LARGE_COLS = 60
         self.ROWS_TO_LOAD = 500
@@ -972,20 +972,15 @@ class DataFrameHeaderModel(QAbstractTableModel):
         self.model = model
         self.axis = axis
         self._palette = palette
+        # all sizes related variables should just follow DataFrameModel
         if self.axis == 0:
-            self.total_cols = self.model.shape[1]
+            self.total_cols = self.model.total_cols
             self._shape = (self.model.header_shape[0], self.model.shape[1])
-            if self.total_cols > self.model.LARGE_COLS:
-                self.cols_loaded = self.model.COLS_TO_LOAD
-            else:
-                self.cols_loaded = self.total_cols
+            self.cols_loaded = self.model.cols_loaded
         else:
-            self.total_rows = self.model.shape[0]
+            self.total_rows = self.model.total_rows
             self._shape = (self.model.shape[0], self.model.header_shape[1])
-            if self.total_rows > self.model.LARGE_NROWS:
-                self.rows_loaded = self.model.ROWS_TO_LOAD
-            else:
-                self.rows_loaded = self.total_rows
+            self.rows_loaded = self.model.rows_loaded
 
     def rowCount(self, index=None):
         """Get number of rows in the header."""
@@ -1712,8 +1707,8 @@ class DataFrameEditor(QDialog):
 
     def set_filter(self, filter_list):
         self.dataModel.set_filter(filter_list, self.df_name)
-        # update qlabel text
-        self.custom_label_view.setQLabel(str(self._model.shape[0]))
+        # reset size of other views
+        self.setModel(self.dataTable.model(), relayout=False)
 
 
     def textbox_return(self):
