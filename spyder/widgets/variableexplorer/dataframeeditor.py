@@ -1273,6 +1273,9 @@ class DataFrameEditor(QDialog):
         btn = QPushButton(_('Resize'))
         btn_layout.addWidget(btn)
         btn.clicked.connect(self.resize_to_contents)
+        btn = QPushButton(_('Plot'))
+        btn_layout.addWidget(btn)
+        btn.clicked.connect(self.plot)
 
         bgcolor = QCheckBox(_('Background color'))
         bgcolor.setChecked(self.dataModel.bgcolor_enabled)
@@ -1714,6 +1717,19 @@ class DataFrameEditor(QDialog):
         # reset size of other views
         self.setModel(self.dataTable.model(), relayout=False)
 
+    def plot(self):
+        import spyder.pyplot as plt
+        df = self.dataModel.df
+        plt.figure()
+        for column in df:
+            # only plot numbers
+            if df[column].dtype not in REAL_NUMBER_TYPES + COMPLEX_NUMBER_TYPES:
+                continue
+            try:
+                plt.plot(df[column])
+            except ValueError:
+                pass
+        plt.show()
 
     def textbox_return(self):
         print(self.textbox.text())
@@ -1740,6 +1756,7 @@ def test_edit(data, title="", parent=None):
     dlg = DataFrameEditor(parent=parent)
 
     if dlg.setup_and_check(data, title=title):
+        dlg.show()  # need this for plot to be able to close, like collectionseditor
         dlg.exec_()
         return dlg.get_value()
     else:
