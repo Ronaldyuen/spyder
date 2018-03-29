@@ -564,8 +564,12 @@ class DataFrameModel(QAbstractTableModel):
             else:
                 color_func = float
                 if self.unique_items_col[column]:
-                    # transform the value to index of unique items
-                    value = self.unique_items_col[column].index(value)
+                    try:
+                        # transform the value to index of unique items
+                        value = self.unique_items_col[column].index(value)
+                    except ValueError:
+                        #  datetime are transformed when called by series.unique(), just ignore the cases
+                        return
                 else:
                     return
             # self.return_max returns global max or column max
@@ -1762,8 +1766,9 @@ def test():
     """DataFrame editor test"""
     from numpy import nan
     import random
-
+    import datetime
     string_list = ['AAAA', 'BBBBB', 'CCCCCCC', 'DDDDDDDD', 'EEEEEEE']
+    datetime_list = [datetime.datetime(2018, 1, 1, 1, 1, 1), datetime.datetime(2022, 2, 2, 2, 2, 2)]
     true_false_list = [True, False]
     nrow = 100000
     r = random.Random(502)
@@ -1777,7 +1782,7 @@ def test():
     df1['Test7'] = 5
     df1 = df1.join([DataFrame([r.choice(true_false_list) for _ in range(nrow)], columns=['true_false_list'])])
     df1 = df1.join([DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list_2'])])
-    df1 = df1.join([DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list_3'])])
+    df1 = df1.join([DataFrame([r.choice(datetime_list) for _ in range(nrow)], columns=['date_time'])])
     df1 = df1.join([DataFrame(np.random.rand(nrow, 10), columns=list(map(chr, range(97, 107))))])
     df1.loc[1, 'a'] = float('nan')
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
