@@ -802,6 +802,7 @@ class DataFrameView(QTableView):
     sig_sort_by_column = Signal()
     sig_fetch_more_columns = Signal()
     sig_fetch_more_rows = Signal()
+    sig_plot = Signal()
 
     def __init__(self, parent, model, header, hscroll, vscroll):
         """Constructor."""
@@ -912,10 +913,15 @@ class DataFrameView(QTableView):
                                     icon=ima.icon('editcopy'),
                                     triggered=self.copy,
                                     context=Qt.WidgetShortcut)
+        plot_action = create_action(self, _('Plot selected columns'),
+                                    icon=ima.icon('plot'),
+                                    triggered=self.sig_plot,
+                                    context=Qt.WidgetShortcut)
         functions = ((_("To bool"), bool), (_("To complex"), complex),
                      (_("To int"), int), (_("To float"), float),
                      (_("To str"), to_text_string))
         types_in_menu = [copy_action]
+        types_in_menu += [plot_action]
         for name, func in functions:
             slot = lambda func=func: self.change_type(func)
             types_in_menu += [create_action(self, name,
@@ -1275,7 +1281,7 @@ class DataFrameEditor(QDialog):
         btn.clicked.connect(self.resize_to_contents)
         btn = QPushButton(_('Plot'))
         btn_layout.addWidget(btn)
-        btn.clicked.connect(self.plot)
+        btn.clicked.connect(self.plot_selected_columns)
 
         bgcolor = QCheckBox(_('Background color'))
         bgcolor.setChecked(self.dataModel.bgcolor_enabled)
@@ -1388,6 +1394,7 @@ class DataFrameEditor(QDialog):
         self.dataTable.sig_sort_by_column.connect(self._sort_update)
         self.dataTable.sig_fetch_more_columns.connect(self._fetch_more_columns)
         self.dataTable.sig_fetch_more_rows.connect(self._fetch_more_rows)
+        self.dataTable.sig_plot.connect(self.plot_selected_columns)
 
     def sortByIndex(self, index):
         """Implement a Index sort."""
@@ -1717,19 +1724,26 @@ class DataFrameEditor(QDialog):
         # reset size of other views
         self.setModel(self.dataTable.model(), relayout=False)
 
-    def plot(self):
+    def plot_selected_columns(self):
         import spyder.pyplot as plt
+        # check selected Index
+        selected_idx = [x.column() for x in self.dataTable.selectedIndexes()]
         df = self.dataModel.df
         plt.figure()
-        for column in df:
-            # only plot numbers
-            if df[column].dtype not in REAL_NUMBER_TYPES + COMPLEX_NUMBER_TYPES:
+        is_anything_plotted = False
+        for idx, col in enumerate(df):
+            # filter non numbers
+            if df[col].dtype not in REAL_NUMBER_TYPES + COMPLEX_NUMBER_TYPES:
+                continue
+            # filter not selected
+            if selected_idx and idx not in selected_idx:
                 continue
             try:
-                plt.plot(df[column])
+                plt.plot(df[col])
+                is_anything_plotted = True
             except ValueError:
                 pass
-        plt.show()
+        plt.show() if is_anything_plotted else plt.close()
 
     def textbox_return(self):
         print(self.textbox.text())
