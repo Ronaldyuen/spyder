@@ -1312,11 +1312,6 @@ class DataFrameEditor(QDialog):
         self.bgcolor_global.stateChanged.connect(self.dataModel.colum_avg)
         btn_layout.addWidget(self.bgcolor_global)
 
-        # testing
-        self.bgcolor_global = QCheckBox(_('Test'))
-        self.bgcolor_global.stateChanged.connect(self.set_filter)
-        btn_layout.addWidget(self.bgcolor_global)
-
         self.textbox = QLineEdit()
         btn_layout.addWidget(self.textbox)
         self.textbox.returnPressed.connect(self.textbox_return)
