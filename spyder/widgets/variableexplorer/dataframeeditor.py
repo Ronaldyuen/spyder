@@ -1292,9 +1292,9 @@ class DataFrameEditor(QDialog):
         # disable format button for int type
         btn_layout.addWidget(btn)
         btn.clicked.connect(self.change_format)
-        btn = QPushButton(_('Resize'))
-        btn_layout.addWidget(btn)
-        btn.clicked.connect(self.resize_to_contents)
+        # btn = QPushButton(_('Resize'))
+        # btn_layout.addWidget(btn)
+        # btn.clicked.connect(self.resize_to_contents)
         btn = QPushButton(_('Plot'))
         btn_layout.addWidget(btn)
         btn.clicked.connect(self.plot_selected_columns)
@@ -1324,7 +1324,7 @@ class DataFrameEditor(QDialog):
         btn_layout.setContentsMargins(4, 4, 4, 4)
         self.layout.addLayout(btn_layout, 4, 0, 1, 2)
         self.setModel(self.dataModel, relayout=True)
-        self.resizeIndexColumn()
+        self.resizeIndexColumnAtInitialization()
         QApplication.processEvents()
         return True
 
@@ -1438,7 +1438,9 @@ class DataFrameEditor(QDialog):
         self.table_header.setRowHeight(row, new_height)
         self._update_layout()
 
-    # the width and height of level, index and header are fixed here
+    # the width and height of level, index and header are first set here
+    # by using sizeHint on verticalHeader etc,
+    # and then re-adjust from the contents in datatable
     def _update_layout(self):
         """Set the width and height of the QTableViews and hide rows."""
         h_width = max(self.table_level.verticalHeader().sizeHint().width(),
@@ -1532,8 +1534,8 @@ class DataFrameEditor(QDialog):
         """Get the size hint for a given column in a table."""
         """
         This function tries to find the maximum width for each column, by checking the width of each cell
-        theres a time limit for this function, default is None
-        Note that the data does not equal the full data (depends on the the data loaded to the table view).
+        there is a time limit for this function, default is None
+        Note that the data does not always equal the full dataframe (depends on the data loaded to the table view).
         table: QTableView
         col: int
         """
@@ -1553,19 +1555,17 @@ class DataFrameEditor(QDialog):
         return max_width
 
     def _resizeColumnToContents(self, header, data, col, limit_ms):
-        """Resize a column width by width of header and data"""
+        """Resize a column width by width of header and data
+        hdr_width should be 0 as header.model() should be empty (when no multi index)
+        Also check the size of the name in header
+        """
         hdr_width = self._sizeHintForColumn(header, col, limit_ms)
+        hdr_name_width = header.horizontalHeader().sectionSizeHint(col)
         data_width = self._sizeHintForColumn(data, col, limit_ms)
-        if data_width > hdr_width:
-            width = min(self.max_width, data_width)
-        elif hdr_width > data_width * 2:
-            width = max(min(hdr_width, self.min_trunc), min(self.max_width,
-                                                            data_width))
-        else:
-            width = min(self.max_width, hdr_width)
+        width = min(self.max_width, max(hdr_width, hdr_name_width, data_width))
         header.setColumnWidth(col, width)
 
-    # This is called by table index only
+    '''
     def _resizeColumnsToContents(self, header, data, limit_ms):
         """Resize all the columns in data"""
         max_col = data.model().columnCount()
@@ -1575,6 +1575,7 @@ class DataFrameEditor(QDialog):
             max_col_ms = limit_ms / max(1, max_col)
         for col in range(max_col):
             self._resizeColumnToContents(header, data, col, max_col_ms)
+    '''
 
     def eventFilter(self, obj, event):
         """Override eventFilter to catch resize event."""
@@ -1596,7 +1597,7 @@ class DataFrameEditor(QDialog):
             super(DataFrameEditor, self).keyPressEvent(event)
 
     def _resizeAllColumnsToContents(self):
-        """Resize all columns """
+        """Resize all columns that is not already resized (checked with _autosized_cols) """
         # decide starting column, ending column and time
         index_column = self.dataTable.rect().topLeft().x()
         start = col = self.dataTable.columnAt(index_column)
@@ -1625,13 +1626,14 @@ class DataFrameEditor(QDialog):
             #     if max_col_ms is not None:
             #         max_col_ms = self._max_autosize_ms / max(1, end - start)
 
-    # not sure what this does
+    '''
     def _resizeCurrentColumnToContents(self, new_index, old_index):
         """Resize the current column to its contents."""
         if new_index.column() not in self._autosized_cols:
             # Ensure the requested column is fully into view after resizing
             self._resizeAllColumnsToContents()
             self.dataTable.scrollTo(new_index)
+    '''
 
     '''This is called by table index only, unused
     def resizeColumnsToContents(self):
@@ -1643,13 +1645,14 @@ class DataFrameEditor(QDialog):
         self.table_level.resizeColumnsToContents()
     # '''
 
-    def resizeIndexColumn(self):
-        self._resizeColumnsToContents(self.table_level,
-                                      self.table_index, self._max_autosize_ms)
+    def resizeIndexColumnAtInitialization(self):
+        """call resize index, this should be the only place where index width is resized
+        1. resize by its contents
+        2. resize of by max of width and the custom header width
+        """
+        self._resizeColumnToContents(self.table_level, self.table_index, 0, self._max_autosize_ms)
         width = max(self.table_level.columnWidth(0), self.table_level.horizontalHeader().sizeHint().width())
         self.table_level.setColumnWidth(0, width)
-        self._autosized_cols = set()
-        self._update_layout()
 
     def change_bgcolor_enable(self, state):
         """
@@ -1694,7 +1697,7 @@ class DataFrameEditor(QDialog):
         else:
             return df
 
-    # only used by resize button
+    '''
     def _update_header_size(self):
         """Update the column width of the header."""
         column_count = self.table_header.model().columnCount()
@@ -1704,6 +1707,7 @@ class DataFrameEditor(QDialog):
                 self.table_header.setColumnWidth(index, column_width)
             else:
                 break
+    '''
 
     def _sort_update(self):
         """
@@ -1721,7 +1725,7 @@ class DataFrameEditor(QDialog):
         """Fetch more data for the index (rows)."""
         self.table_index.model().fetch_more()
 
-    # only used by resize button
+    '''
     def resize_to_contents(self):
         QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
         self.dataTable.resizeColumnsToContents()
@@ -1729,6 +1733,7 @@ class DataFrameEditor(QDialog):
         self.dataTable.resizeColumnsToContents()
         self._update_header_size()
         QApplication.restoreOverrideCursor()
+    '''
 
     def set_filter(self, filter_list):
         self.dataModel.set_filter(filter_list, self.df_name)
@@ -1818,8 +1823,8 @@ def test():
     df1['Test2'] = 1
     df1.loc[8, 'Test2'] = float('nan')
     df1['Test3'] = df1['Test']
-    df1['Test4'] = df1['Test']
-    df1['Test5'] = df1['Test']
+    df1['really_long_column_name_1'] = df1['Test']
+    df1['really_long_column_name_2'] = df1['Test']
     df1['Test6'] = "Test"
     df1['Test7'] = 5
     df1 = df1.join([DataFrame([r.choice(true_false_list) for _ in range(nrow)], columns=['true_false_list'])])
@@ -1829,7 +1834,7 @@ def test():
     df1.loc[1, 'a'] = float('nan')
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
     df1 = df1.join([DataFrame([{'F': [1, 2, 3, 4]}])])
-    df1['Test8'] = df1['Test']
+    df1['super_super_super_unacceptable_long_column_name_that_should_not_happen'] = df1['Test']
     # df1.set_index('Test3', inplace=True)
 
     test_wrapper(test_edit, df1, is_profiling=False)
