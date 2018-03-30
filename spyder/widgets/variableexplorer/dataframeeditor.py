@@ -507,39 +507,55 @@ class DataFrameModel(QAbstractTableModel):
         # init original df
         if self.original_df is None:
             self.original_df = self.df.copy()
-        # TOOD: replace "" for string
-        # TODO: check @@ and raise error if present
         query_list = []
-        for idx, filter in enumerate(filter_list):
-            if filter != '':
-                column_name = str(self.original_df.columns[idx])
-                # either put the column_name in front or replace @@, @@ acts as a placeholder
-                if '@@' in filter:
-                    filter = filter.replace('@@', column_name)
-                else:
-                    filter = 'self.original_df["{}"]'.format(column_name) + filter
-                query_list.append('({})'.format(filter))
+        for idx, filter_str in enumerate(filter_list):
+            result = self._get_query_text(idx, filter_str)
+            if result is not None:
+                query_list.extend(result)
         query_text = '& '.join(query_list)
         # TODO: support startswith
-        print(query_text)
         if query_text == '':
             self.df = self.original_df
-        else:
-            try:
-                exec_text = 'self.df = self.original_df[{}].copy()'.format(query_text)
-                print(exec_text)
-                exec(exec_text)
-                self.filtered_exec = exec_text.replace('self.df', df_name).replace('self.original_df', df_name)
-                print(self.filtered_exec)
-                self.sig_exec_filter.emit()
-            except:
-                QMessageBox.critical(self.dialog, _("Error"), traceback.format_exc())
+            return
+        exec_text = 'self.df = self.original_df[{}].copy()'.format(query_text)
+        try:
+            exec(exec_text)
+        except:
+            QMessageBox.critical(self.dialog, _("Error"), traceback.format_exc())
+            return
+        self.filtered_exec = exec_text.replace('self.df', df_name).replace('self.original_df', df_name)
+        self.sig_exec_filter.emit()
         # reset total rows
         self.total_rows = self.df.shape[0]
         # update color after filter
         self.unique_col_update()
         self.max_min_col_update()
         self.reset()
+
+    def _get_query_text(self, idx, filter_str):
+        """wrap filter_str with df name and column name
+        split the text with ","
+        do not split if it could not be executed, this is to handle "," inside original filter
+        """
+        if filter_str == '':
+            return
+        # try split with "," if fail return full_str
+        filters = filter_str.split(",")
+        is_failed = False
+        column_name = str(self.original_df.columns[idx])
+        query_list = []
+        for filter in filters:
+            filter = '(self.original_df["{}"]{})'.format(column_name, filter.strip())
+            try:
+                exec(filter)
+            except:
+                is_failed = True
+                break
+            query_list.append(filter)
+        if not is_failed:
+            return query_list
+        else:
+            return ['(self.original_df["{}"]{})'.format(column_name, filter_str)]
 
     # this is the Qmodelindex http://doc.qt.io/qt-5/qmodelindex.html
     def get_bgcolor(self, index):
