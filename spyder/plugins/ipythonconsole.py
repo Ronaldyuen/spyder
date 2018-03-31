@@ -42,7 +42,7 @@ except ImportError:
 # Local imports
 from spyder import dependencies
 from spyder.config.base import (_, DEV, get_conf_path, get_home_dir,
-                                get_module_path, PYTEST)
+                                get_module_path, running_under_pytest)
 from spyder.config.main import CONF
 from spyder.api.plugins import SpyderPluginWidget
 from spyder.api.preferences import PluginConfigPage
@@ -395,7 +395,7 @@ class IPythonConsoleConfigPage(PluginConfigPage):
         backend_group.setLayout(backend_layout)
         backend_group.setEnabled(self.get_option('pylab'))
         pylab_box.toggled.connect(backend_group.setEnabled)
-        
+
         # Inline backend Group
         inline_group = QGroupBox(_("Inline backend"))
         inline_label = QLabel(_("Decide how to render the figures created by "
@@ -403,7 +403,8 @@ class IPythonConsoleConfigPage(PluginConfigPage):
         inline_label.setWordWrap(True)
         formats = (("PNG", 0), ("SVG", 1))
         format_box = self.create_combobox(_("Format:")+"   ", formats,
-                                       'pylab/inline/figure_format', default=0)
+                                          'pylab/inline/figure_format',
+                                          default=0)
         resolution_spin = self.create_spinbox(
                         _("Resolution:")+"  ", " "+_("dpi"),
                         'pylab/inline/resolution', min_=50, max_=999, step=0.1,
@@ -417,7 +418,15 @@ class IPythonConsoleConfigPage(PluginConfigPage):
                           _("Height:")+"  ", " "+_("inches"),
                           'pylab/inline/height', min_=1, max_=20, step=1,
                           tip=_("Default is 4"))
-        
+        bbox_inches_box = newcb(
+            _("Use a tight layout for inline plots"),
+            'pylab/inline/bbox_inches',
+            tip=_("Sets bbox_inches to \"tight\" when\n"
+                  "plotting inline with matplotlib.\n"
+                  "When enabled, can cause discrepancies\n"
+                  "between the image displayed inline and\n"
+                  "that created using savefig."))
+
         inline_v_layout = QVBoxLayout()
         inline_v_layout.addWidget(inline_label)
         inline_layout = QGridLayout()
@@ -432,6 +441,8 @@ class IPythonConsoleConfigPage(PluginConfigPage):
         inline_layout.addWidget(height_spin.plabel, 4, 0)
         inline_layout.addWidget(height_spin.spinbox, 4, 1)
         inline_layout.addWidget(height_spin.slabel, 4, 2)
+        inline_layout.addWidget(bbox_inches_box, 5, 0, 1, 4)
+
         inline_h_layout = QHBoxLayout()
         inline_h_layout.addLayout(inline_layout)
         inline_h_layout.addStretch(1)
@@ -476,20 +487,46 @@ class IPythonConsoleConfigPage(PluginConfigPage):
         run_file_group.setLayout(run_file_layout)
         
         # ---- Advanced settings ----
+        # Enable Jedi completion
+        jedi_group = QGroupBox(_("Jedi completion"))
+        jedi_label = QLabel(_("Enable Jedi-based <tt>Tab</tt> completion "
+                                  "in the IPython console; similar to the "
+                                  "greedy completer, but without evaluating "
+                                  "the code.<br>"
+                                  "<b>Warning:</b> Slows down your console "
+                                  "when working with large dataframes!"))
+        jedi_label.setWordWrap(True)
+        jedi_box = newcb(_("Use Jedi completion in the IPython console"), 
+                             "jedi_completer",
+                             tip="<b>Warning</b>: "
+                                 "Slows down your console when working with "
+                                 "large dataframes!<br>"
+                                 "Allows completion of nested lists etc.")
+        
+        jedi_layout = QVBoxLayout()
+        jedi_layout.addWidget(jedi_label)
+        jedi_layout.addWidget(jedi_box)
+        jedi_group.setLayout(jedi_layout)
+                
         # Greedy completer group
         greedy_group = QGroupBox(_("Greedy completion"))
         greedy_label = QLabel(_("Enable <tt>Tab</tt> completion on elements "
                                 "of lists, results of function calls, etc, "
-                                "<i>without</i> assigning them to a "
-                                "variable.<br>"
-                                "For example, you can get completions on "
-                                "things like <tt>li[0].&lt;Tab&gt;</tt> or "
-                                "<tt>ins.meth().&lt;Tab&gt;</tt>"))
+                                "<i>without</i> assigning them to a variable, "
+                                "like <tt>li[0].&lt;Tab&gt;</tt> or "
+                                "<tt>ins.meth().&lt;Tab&gt;</tt> <br>"
+                                "<b>Warning:</b> Due to a bug, IPython's "
+                                "greedy completer requires a leading "
+                                "<tt>&lt;Space&gt;</tt> for some completions; "
+                                "e.g.  <tt>np.sin(&lt;Space&gt;np.&lt;Tab&gt;"
+                                "</tt> works while <tt>np.sin(np.&lt;Tab&gt; "
+                                "</tt> doesn't."))
         greedy_label.setWordWrap(True)
-        greedy_box = newcb(_("Use the greedy completer"), "greedy_completer",
+        greedy_box = newcb(_("Use greedy completion in the IPython console"),
+                           "greedy_completer",
                            tip="<b>Warning</b>: It can be unsafe because the "
-                                "code is actually evaluated when you press "
-                                "<tt>Tab</tt>.")
+                               "code is actually evaluated when you press "
+                               "<tt>Tab</tt>.")
         
         greedy_layout = QVBoxLayout()
         greedy_layout.addWidget(greedy_label)
@@ -499,10 +536,10 @@ class IPythonConsoleConfigPage(PluginConfigPage):
         # Autocall group
         autocall_group = QGroupBox(_("Autocall"))
         autocall_label = QLabel(_("Autocall makes IPython automatically call "
-                                "any callable object even if you didn't type "
-                                "explicit parentheses.<br>"
-                                "For example, if you type <i>str 43</i> it "
-                                "becomes <i>str(43)</i> automatically."))
+                                  "any callable object even if you didn't "
+                                  "type explicit parentheses.<br>"
+                                  "For example, if you type <i>str 43</i> it "
+                                  "becomes <i>str(43)</i> automatically."))
         autocall_label.setWordWrap(True)
         
         smart = _('Smart')
@@ -574,7 +611,7 @@ class IPythonConsoleConfigPage(PluginConfigPage):
                                     _("Graphics"))
         tabs.addTab(self.create_tab(run_lines_group, run_file_group),
                                     _("Startup"))
-        tabs.addTab(self.create_tab(greedy_group, autocall_group, sympy_group,
+        tabs.addTab(self.create_tab(jedi_group, greedy_group, autocall_group, sympy_group,
                                     prompts_group), _("Advanced Settings"))
 
         vlayout = QVBoxLayout()
@@ -875,6 +912,11 @@ class IPythonConsole(SpyderPluginWidget):
         """Run script in current or dedicated client"""
         norm = lambda text: remove_backslashes(to_text_string(text))
 
+        # Run Cython files in a dedicated console
+        is_cython = osp.splitext(filename)[1] == '.pyx'
+        if is_cython:
+            current_client = False
+
         # Select client to execute code on it
         is_new_client = False
         if current_client:
@@ -882,7 +924,7 @@ class IPythonConsole(SpyderPluginWidget):
         else:
             client = self.get_client_for_file(filename)
             if client is None:
-                self.create_client_for_file(filename)
+                self.create_client_for_file(filename, is_cython=is_cython)
                 client = self.get_current_client()
                 is_new_client = True
 
@@ -905,6 +947,7 @@ class IPythonConsole(SpyderPluginWidget):
                 line += "\"%s\"" % to_text_string(filename)
                 if args:
                     line += " %s" % norm(args)
+
             try:
                 if current_client:
                     self.execute_code(line, current_client, clear_variables)
@@ -965,7 +1008,12 @@ class IPythonConsole(SpyderPluginWidget):
                     sw.reset_namespace(warning=False, silent=True)
                 elif current_client and clear_variables:
                     sw.reset_namespace(warning=False, silent=True)
-                sw.execute(to_text_string(lines))
+                # Needed to handle an error when kernel_client is none
+                # See issue 6308
+                try:
+                    sw.execute(to_text_string(lines))
+                except AttributeError:
+                    pass
             self.activateWindow()
             self.get_current_client().get_control().setFocus()
 
@@ -978,7 +1026,9 @@ class IPythonConsole(SpyderPluginWidget):
     @Slot(bool)
     @Slot(str)
     @Slot(bool, str)
-    def create_new_client(self, give_focus=True, filename=''):
+    @Slot(bool, bool)
+    @Slot(bool, str, bool)
+    def create_new_client(self, give_focus=True, filename='', is_cython=False):
         """Create a new client"""
         self.master_clients += 1
         client_id = dict(int_id=to_text_string(self.master_clients),
@@ -1029,7 +1079,7 @@ class IPythonConsole(SpyderPluginWidget):
                                      "<tt>conda install ipykernel cloudpickle</tt>"))
                 return
 
-        self.connect_client_to_kernel(client)
+        self.connect_client_to_kernel(client, is_cython=is_cython)
         if client.shellwidget.kernel_manager is None:
             return
         self.register_client(client)
@@ -1045,7 +1095,7 @@ class IPythonConsole(SpyderPluginWidget):
             self._create_client_for_kernel(connection_file, hostname, sshkey,
                                            password)
 
-    def connect_client_to_kernel(self, client):
+    def connect_client_to_kernel(self, client, is_cython=False):
         """Connect a client to its kernel"""
         connection_file = client.connection_file
 
@@ -1054,8 +1104,11 @@ class IPythonConsole(SpyderPluginWidget):
         else:
             stderr_file = client.stderr_file
 
-        km, kc = self.create_kernel_manager_and_kernel_client(connection_file,
-                                                              stderr_file)
+        km, kc = self.create_kernel_manager_and_kernel_client(
+                     connection_file,
+                     stderr_file,
+                     is_cython=is_cython)
+
         # An error occurred if this is True
         if is_string(km) and kc is None:
             client.shellwidget.kernel_manager = None
@@ -1088,7 +1141,7 @@ class IPythonConsole(SpyderPluginWidget):
             import1 = "import sys"
             # We need to add spy_dir to sys.path so this test can be
             # run in our CIs
-            if PYTEST:
+            if running_under_pytest():
                 if os.name == 'nt':
                     import1 = (import1 +
                                '; sys.path.append(""{}"")'.format(spy_dir))
@@ -1406,10 +1459,10 @@ class IPythonConsole(SpyderPluginWidget):
         sw = self.get_current_shellwidget()
         sw.set_cwd(path)
 
-    def create_client_for_file(self, filename):
+    def create_client_for_file(self, filename, is_cython=False):
         """Create a client to execute code related to a file."""
         # Create client
-        self.create_new_client(filename=filename)
+        self.create_new_client(filename=filename, is_cython=is_cython)
 
         # Don't increase the count of master clients
         self.master_clients -= 1
@@ -1464,20 +1517,20 @@ class IPythonConsole(SpyderPluginWidget):
                             timeout)
         return tuple(lports)
 
-    def create_kernel_spec(self):
+    def create_kernel_spec(self, is_cython=False):
         """Create a kernel spec for our own kernels"""
         # Before creating our kernel spec, we always need to
         # set this value in spyder.ini
         if not self.testing:
             CONF.set('main', 'spyder_pythonpath',
                      self.main.get_spyder_pythonpath())
-        return SpyderKernelSpec()
+        return SpyderKernelSpec(is_cython=is_cython)
 
     def create_kernel_manager_and_kernel_client(self, connection_file,
-                                                stderr_file):
+                                                stderr_file, is_cython=False):
         """Create kernel manager and client."""
         # Kernel spec
-        kernel_spec = self.create_kernel_spec()
+        kernel_spec = self.create_kernel_spec(is_cython=is_cython)
         if not kernel_spec.env.get('PYTHONPATH'):
             error_msg = _("This error was most probably caused by installing "
                           "Spyder in a directory with non-ascii characters "
@@ -1494,7 +1547,12 @@ class IPythonConsole(SpyderPluginWidget):
 
         # Save stderr in a file to read it later in case of errors
         if stderr_file is not None:
-            stderr = codecs.open(stderr_file, 'w', encoding='utf-8')
+            # Needed to prevent any error that could appear.
+            # See issue 6267
+            try:
+                stderr = codecs.open(stderr_file, 'w', encoding='utf-8')
+            except Exception:
+                stderr = None
         else:
             stderr = None
         kernel_manager.start_kernel(stderr=stderr)

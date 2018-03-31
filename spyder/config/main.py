@@ -94,7 +94,7 @@ DEFAULTS = [
               'use_custom_margin': True,
               'custom_margin': 0,
               'use_custom_cursor_blinking': False,
-              'show_internal_console_if_traceback': False,
+              'show_internal_errors': True,
               'check_updates_on_startup': True,
               'toolbars_visible': True,
               # Global Spyder fonts
@@ -154,10 +154,12 @@ DEFAULTS = [
               'pylab/inline/resolution': 72,
               'pylab/inline/width': 6,
               'pylab/inline/height': 4,
+              'pylab/inline/bbox_inches': False,
               'startup/run_lines': '',
               'startup/use_run_file': False,
               'startup/run_file': '',
               'greedy_completer': False,
+              'jedi_completer': False,
               'autocall': 0,
               'symbolic_math': False,
               'in_prompt': '',
@@ -354,6 +356,7 @@ DEFAULTS = [
               'editor/unindent': 'Ctrl+[',
               'editor/move line up': "Alt+Up",
               'editor/move line down': "Alt+Down",
+              'editor/go to new line': "Ctrl+Shift+Return",
               'editor/go to definition': "Ctrl+G",
               'editor/toggle comment': "Ctrl+1",
               'editor/blockcomment': "Ctrl+4",
@@ -647,7 +650,7 @@ DEFAULTS = [
 #    or if you want to *rename* options, then you need to do a MAJOR update in
 #    version, e.g. from 3.0.0 to 4.0.0
 # 3. You don't need to touch this value if you're just adding a new option
-CONF_VERSION = '42.0.0'
+CONF_VERSION = '43.0.0'
 
 # Main configuration instance
 try:

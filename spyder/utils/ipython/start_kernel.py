@@ -69,10 +69,12 @@ def kernel_config():
     # Until we implement Issue 1052
     spy_cfg.InteractiveShell.xmode = 'Plain'
 
+    # Jedi completer
+    jedi_o = os.environ.get('SPY_JEDI_O') == 'True'
     # - Using Jedi slow completions a lot for objects with big repr's.
     # - Jedi completions are not available in Python 2.
     if not PY2:
-        spy_cfg.IPCompleter.use_jedi = False
+        spy_cfg.IPCompleter.use_jedi = jedi_o
 
     # Run lines of code at startup
     run_lines_o = os.environ.get('SPY_RUN_LINES_O')
@@ -164,9 +166,16 @@ def kernel_config():
                     spy_cfg.InlineBackend.rc['figure.figsize'] = (width_o,
                                                                   height_o)
 
+                # Print figure kwargs
+                bbox_inches_o = os.environ.get('SPY_BBOX_INCHES_O')
+                bbox_inches = 'tight' if bbox_inches_o == 'True' else None
+                spy_cfg.InlineBackend.print_figure_kwargs.update(
+                    {'bbox_inches': bbox_inches})
+
     # Enable Cython magic
-    if is_module_installed('Cython'):
-        spy_cfg.IPKernelApp.exec_lines.append('%load_ext Cython')
+    run_cython = os.environ.get('SPY_RUN_CYTHON') == 'True'
+    if run_cython and is_module_installed('Cython'):
+        spy_cfg.IPKernelApp.exec_lines.append('%reload_ext Cython')
 
     # Run a file at startup
     use_file_o = os.environ.get('SPY_USE_FILE_O')

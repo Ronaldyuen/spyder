@@ -20,7 +20,7 @@ import errno, os
 from time import time as _uniquefloat
 
 import psutil
-from spyder.config.base import PYTEST
+from spyder.config.base import running_under_pytest
 from spyder.py3compat import PY2, to_binary_string
 
 def unique():
@@ -88,8 +88,11 @@ else:
         try:
             rename(newlinkname, filename)
         except:
-            os.remove(newvalname)
-            os.rmdir(newlinkname)
+            try:
+                os.remove(newvalname)
+                os.rmdir(newlinkname)
+            except (IOError, OSError):
+                pass
             raise
 
     def readlink(filename):   #analysis:ignore
@@ -181,8 +184,9 @@ class FilesystemLock:
                         p = psutil.Process(int(pid))
 
                         # Valid names for main script
-                        names = set(['spyder', 'spyder3', 'bootstrap.py'])
-                        if PYTEST:
+                        names = set(['spyder', 'spyder3', 'spyder.exe',
+                                     'spyder3.exe', 'bootstrap.py'])
+                        if running_under_pytest():
                             names.add('runtests.py')
 
                         # Check the first three command line arguments

@@ -16,6 +16,7 @@ from jupyter_client.kernelspec import KernelSpec
 from spyder.config.base import get_module_source_path
 from spyder.config.main import CONF
 from spyder.utils.encoding import to_unicode_from_fs
+from spyder.utils.programs import is_python_interpreter
 from spyder.py3compat import PY2, iteritems, to_text_string, to_binary_string
 from spyder.utils.misc import (add_pathlist_to_PYTHONPATH,
                                get_python_executable)
@@ -26,8 +27,10 @@ class SpyderKernelSpec(KernelSpec):
 
     spy_path = get_module_source_path('spyder')
 
-    def __init__(self, **kwargs):
+    def __init__(self, is_cython=False, **kwargs):
         super(SpyderKernelSpec, self).__init__(**kwargs)
+        self.is_cython = is_cython
+
         self.display_name = 'Python 2 (Spyder)' if PY2 else 'Python 3 (Spyder)'
         self.language = 'python2' if PY2 else 'python3'
         self.resource_dir = ''
@@ -43,6 +46,11 @@ class SpyderKernelSpec(KernelSpec):
             # to the kernel sys.path
             os.environ.pop('VIRTUAL_ENV', None)
             pyexec = CONF.get('main_interpreter', 'executable')
+            if not is_python_interpreter(pyexec):
+                pyexec = get_python_executable()
+                CONF.set('main_interpreter', 'executable', '')
+                CONF.set('main_interpreter', 'default', True)
+                CONF.set('main_interpreter', 'custom', False)
 
         # Fixes Issue #3427
         if os.name == 'nt':
@@ -107,6 +115,8 @@ class SpyderKernelSpec(KernelSpec):
                                              'pylab/autoload'),
             'SPY_FORMAT_O': CONF.get('ipython_console',
                                      'pylab/inline/figure_format'),
+            'SPY_BBOX_INCHES_O': CONF.get('ipython_console',
+                                          'pylab/inline/bbox_inches'),
             'SPY_RESOLUTION_O': CONF.get('ipython_console',
                                          'pylab/inline/resolution'),
             'SPY_WIDTH_O': CONF.get('ipython_console', 'pylab/inline/width'),
@@ -116,7 +126,9 @@ class SpyderKernelSpec(KernelSpec):
             'SPY_RUN_FILE_O': CONF.get('ipython_console', 'startup/run_file'),
             'SPY_AUTOCALL_O': CONF.get('ipython_console', 'autocall'),
             'SPY_GREEDY_O': CONF.get('ipython_console', 'greedy_completer'),
-            'SPY_SYMPY_O': CONF.get('ipython_console', 'symbolic_math')
+            'SPY_JEDI_O': CONF.get('ipython_console', 'jedi_completer'),
+            'SPY_SYMPY_O': CONF.get('ipython_console', 'symbolic_math'),
+            'SPY_RUN_CYTHON': self.is_cython
         }
 
         # Add our PYTHONPATH to env_vars

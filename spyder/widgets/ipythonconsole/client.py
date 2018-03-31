@@ -18,7 +18,7 @@ import os
 import os.path as osp
 from string import Template
 from threading import Thread
-from time import ctime, time, strftime, gmtime
+import time
 
 # Third party imports (qtpy)
 from qtpy.QtCore import QUrl, QTimer, Signal, Slot
@@ -27,13 +27,13 @@ from qtpy.QtWidgets import (QHBoxLayout, QLabel, QMenu, QMessageBox,
                             QToolButton, QVBoxLayout, QWidget)
 
 # Local imports
-from spyder.config.base import _, get_image_path, get_module_source_path
+from spyder.config.base import (_, get_image_path, get_module_source_path,
+                                running_under_pytest)
 from spyder.config.gui import get_font, get_shortcut
 from spyder.utils import icon_manager as ima
 from spyder.utils import sourcecode
 from spyder.utils.encoding import get_coding
 from spyder.utils.environ import RemoteEnvDialog
-from spyder.utils.ipython.style import create_qss_style
 from spyder.utils.programs import TEMPDIR
 from spyder.utils.qthelpers import (add_actions, create_action,
                                     create_toolbutton, DialogManager,
@@ -57,6 +57,11 @@ TEMPLATES_PATH = osp.join(UTILS_PATH, 'ipython', 'templates')
 BLANK = open(osp.join(TEMPLATES_PATH, 'blank.html')).read()
 LOADING = open(osp.join(TEMPLATES_PATH, 'loading.html')).read()
 KERNEL_ERROR = open(osp.join(TEMPLATES_PATH, 'kernel_error.html')).read()
+
+try:
+    time.monotonic  # time.monotonic new in 3.3
+except AttributeError:
+    time.monotonic = time.time
 
 
 #-----------------------------------------------------------------------------
@@ -84,7 +89,7 @@ class ClientWidget(QWidget, SaveHistoryMixin):
     to print different messages there.
     """
 
-    SEPARATOR = '{0}## ---({1})---'.format(os.linesep*2, ctime())
+    SEPARATOR = '{0}## ---({1})---'.format(os.linesep*2, time.ctime())
     INITHISTORY = ['# -*- coding: utf-8 -*-',
                    '# *** Spyder Python Console History Log ***',]
 
@@ -136,7 +141,7 @@ class ClientWidget(QWidget, SaveHistoryMixin):
 
         # Elapsed time
         self.time_label = None
-        self.t0 = None
+        self.t0 = time.monotonic()
         self.timer = QTimer(self)
 
         # --- Layout
@@ -233,10 +238,7 @@ class ClientWidget(QWidget, SaveHistoryMixin):
         self.shellwidget.executed.connect(self.shellwidget.get_cwd)
 
         # To apply style
-        if not create_qss_style(self.shellwidget.syntax_style)[1]:
-            self.shellwidget.silent_execute("%colors linux")
-        else:
-            self.shellwidget.silent_execute("%colors lightbg")
+        self.set_color_scheme(self.shellwidget.syntax_style, reset=False)
 
         # To hide the loading page
         self.shellwidget.sig_prompt_ready.connect(self._hide_loading_page)
@@ -433,9 +435,9 @@ class ClientWidget(QWidget, SaveHistoryMixin):
         font = get_font(option='rich_font')
         self.infowidget.set_font(font)
 
-    def set_color_scheme(self, color_scheme):
+    def set_color_scheme(self, color_scheme, reset=True):
         """Set IPython color scheme."""
-        self.shellwidget.set_color_scheme(color_scheme)
+        self.shellwidget.set_color_scheme(color_scheme, reset)
 
     def shutdown(self):
         """Shutdown kernel"""
@@ -446,24 +448,32 @@ class ClientWidget(QWidget, SaveHistoryMixin):
 
     def interrupt_kernel(self):
         """Interrupt the associanted Spyder kernel if it's running"""
-        self.shellwidget.request_interrupt_kernel()
+        # Needed to prevent a crash when a kernel is not running.
+        # See issue 6299
+        try:
+            self.shellwidget.request_interrupt_kernel()
+        except RuntimeError:
+            pass
 
     @Slot()
     def restart_kernel(self):
         """
-        Restart the associanted kernel
+        Restart the associated kernel.
 
         Took this code from the qtconsole project
         Licensed under the BSD license
         """
         sw = self.shellwidget
 
-        message = _('Are you sure you want to restart the kernel?')
-        buttons = QMessageBox.Yes | QMessageBox.No
-        result = QMessageBox.question(self, _('Restart kernel?'),
-                                      message, buttons)
+        if not running_under_pytest():
+            message = _('Are you sure you want to restart the kernel?')
+            buttons = QMessageBox.Yes | QMessageBox.No
+            result = QMessageBox.question(self, _('Restart kernel?'),
+                                          message, buttons)
+        else:
+            result = None
 
-        if result == QMessageBox.Yes:
+        if result == QMessageBox.Yes or running_under_pytest():
             if sw.kernel_manager:
                 if self.infowidget.isVisible():
                     self.infowidget.hide()
@@ -476,7 +486,10 @@ class ClientWidget(QWidget, SaveHistoryMixin):
                         before_prompt=True
                     )
                 else:
-                    sw.reset(clear=True)
+                    # For issue 6235.  IPython was changing the setting of
+                    # %colors on windows by assuming it was using a dark
+                    # background.  This corrects it based on the scheme.
+                    self.set_color_scheme(sw.syntax_style)
                     sw._append_html(_("<br>Restarting kernel...\n<hr><br>"),
                                     before_prompt=False)
             else:
@@ -559,8 +572,13 @@ class ClientWidget(QWidget, SaveHistoryMixin):
         """Text to show in time_label."""
         if self.time_label is None:
             return
-        elapsed_time = time() - self.t0
-        if elapsed_time > 24 * 3600: # More than a day...!
+
+        elapsed_time = time.monotonic() - self.t0
+        # System time changed to past date, so reset start.
+        if elapsed_time < 0:
+            self.t0 = time.monotonic()
+            elapsed_time = 0
+        if elapsed_time > 24 * 3600:  # More than a day...!
             fmt = "%d %H:%M:%S"
         else:
             fmt = "%H:%M:%S"
@@ -569,7 +587,8 @@ class ClientWidget(QWidget, SaveHistoryMixin):
         else:
             color = "#AA6655"
         text = "<span style=\'color: %s\'><b>%s" \
-               "</b></span>" % (color, strftime(fmt, gmtime(elapsed_time)))
+               "</b></span>" % (color,
+                                time.strftime(fmt, time.gmtime(elapsed_time)))
         self.time_label.setText(text)
 
     def update_time_label_visibility(self):
