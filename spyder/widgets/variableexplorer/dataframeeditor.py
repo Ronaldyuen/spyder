@@ -1305,12 +1305,20 @@ class DataFrameEditor(QDialog):
         bgcolor.stateChanged.connect(self.change_bgcolor_enable)
         btn_layout.addWidget(bgcolor)
 
+        self.is_resized_by_contents_only = False
+        resize_by_contents = QCheckBox(_('Resize by contents'))
+        resize_by_contents.setChecked(self.is_resized_by_contents_only)
+        resize_by_contents.stateChanged.connect(self.change_is_resized_by_contents)
+        btn_layout.addWidget(resize_by_contents)
+
+        '''
         self.bgcolor_global = QCheckBox(_('Column min/max'))
         self.bgcolor_global.setChecked(self.dataModel.colum_avg_enabled)
         self.bgcolor_global.setEnabled(not self.is_series and
                                        self.dataModel.bgcolor_enabled)
         self.bgcolor_global.stateChanged.connect(self.dataModel.colum_avg)
         btn_layout.addWidget(self.bgcolor_global)
+        '''
 
         self.textbox = QLineEdit()
         btn_layout.addWidget(self.textbox)
@@ -1557,12 +1565,15 @@ class DataFrameEditor(QDialog):
     def _resizeColumnToContents(self, header, data, col, limit_ms):
         """Resize a column width by width of header and data
         hdr_width should be 0 as header.model() should be empty (when no multi index)
-        Also check the size of the name in header
+        check the size of the name in header if is_resized_by_contents
         """
         hdr_width = self._sizeHintForColumn(header, col, limit_ms)
         hdr_name_width = header.horizontalHeader().sectionSizeHint(col)
         data_width = self._sizeHintForColumn(data, col, limit_ms)
-        width = min(self.max_width, max(hdr_width, hdr_name_width, data_width))
+        if self.is_resized_by_contents_only:
+            width = min(self.max_width, max(hdr_width, data_width))
+        else:
+            width = min(self.max_width, max(hdr_width, hdr_name_width, data_width))
         header.setColumnWidth(col, width)
 
     '''
@@ -1660,6 +1671,11 @@ class DataFrameEditor(QDialog):
         """
         self.dataModel.bgcolor(state)
         self.bgcolor_global.setEnabled(not self.is_series and state > 0)
+
+    def change_is_resized_by_contents(self, state):
+        self.is_resized_by_contents_only = state > 0
+        self._autosized_cols = set()
+        self._resizeAllColumnsToContents()
 
     def change_format(self):
         """
