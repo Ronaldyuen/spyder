@@ -313,7 +313,6 @@ class DataFrameModel(QAbstractTableModel):
     For more information please see:
     https://github.com/wavexx/gtabview/blob/master/gtabview/models.py
     """
-    sig_exec_filter = Signal()
 
     def __init__(self, dataFrame, format=DEFAULT_FORMAT, parent=None):
         # model loading values
@@ -516,15 +515,16 @@ class DataFrameModel(QAbstractTableModel):
         # TODO: support startswith
         if query_text == '':
             self.df = self.original_df
+            self.filtered_text = ''
             return
-        exec_text = 'self.df = self.original_df[{}].copy()'.format(query_text)
+        core_exec_text = 'self.original_df[{}]'.format(query_text)
+        exec_text = 'self.df = ' + core_exec_text + '.copy()'
         try:
             exec(exec_text)
         except:
             QMessageBox.critical(self.dialog, _("Error"), traceback.format_exc())
             return
-        self.filtered_exec = exec_text.replace('self.df', df_name).replace('self.original_df', df_name)
-        self.sig_exec_filter.emit()
+        self.filtered_text = core_exec_text.replace('self.original_df', df_name)
         # reset total rows
         self.total_rows = self.df.shape[0]
         # update color after filter
@@ -1264,7 +1264,6 @@ class DataFrameEditor(QDialog):
 
         # Create the model and view of the data
         self.dataModel = DataFrameModel(data, parent=self)
-        self.dataModel.sig_exec_filter.connect(self.update_exec_filter)
         # data frame view
         self.create_data_table()
 
@@ -1322,7 +1321,7 @@ class DataFrameEditor(QDialog):
 
         self.textbox = QLineEdit()
         btn_layout.addWidget(self.textbox)
-        self.textbox.returnPressed.connect(self.textbox_return)
+        self.textbox.setPlaceholderText('Filtered command')
 
         btn_layout.addStretch()
         bbox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -1777,14 +1776,9 @@ class DataFrameEditor(QDialog):
                 pass
         plt.show() if is_anything_plotted else plt.close()
 
-    def textbox_return(self):
-        print(self.textbox.text())
-
     def handleFilterActivated(self):
         self.set_filter(self.custom_header_view.getText())
-
-    def update_exec_filter(self):
-        self.textbox.setText(self.dataModel.filtered_exec)
+        self.textbox.setText(self.dataModel.filtered_text)
 
 
 # ==============================================================================
