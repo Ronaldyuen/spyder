@@ -328,7 +328,7 @@ class DataFrameModel(QAbstractTableModel):
         QAbstractTableModel.__init__(self)
         self.dialog = parent
         self.df = dataFrame
-        self.original_df = None
+        self.original_df = dataFrame.copy()
         self.df_index = dataFrame.index.tolist()
         self.df_header = dataFrame.columns.tolist()
         self._format = format
@@ -502,13 +502,11 @@ class DataFrameModel(QAbstractTableModel):
         self.reset()
 
     def set_filter(self, filter_list, df_name):
-        """just like sort, modify self.df and then reset"""
-        # init original df
-        if self.original_df is None:
-            self.original_df = self.df.copy()
+        """filter self.df by the filter_list given
+        just like sort, modify self.df and then reset"""
         query_list = []
         for idx, filter_str in enumerate(filter_list):
-            result = self._get_query_text(idx, filter_str)
+            result = self._get_query_list(idx, filter_str)
             if result is not None:
                 query_list.extend(result)
         query_text = '& '.join(query_list)
@@ -532,30 +530,25 @@ class DataFrameModel(QAbstractTableModel):
         self.max_min_col_update()
         self.reset()
 
-    def _get_query_text(self, idx, filter_str):
+    def _get_query_list(self, idx, filter_str):
         """wrap filter_str with df name and column name
-        split the text with ","
-        do not split if it could not be executed, this is to handle "," inside original filter
+        with some special characters handling
         """
         if filter_str == '':
             return
+        filter_str = filter_str.replace("^^", ".str.startswith")
         # try split with "," if fail return full_str
-        filters = filter_str.split(",")
-        is_failed = False
+        filters = filter_str.split("||")
         column_name = str(self.original_df.columns[idx])
         query_list = []
         for filter in filters:
-            filter = '(self.original_df["{}"]{})'.format(column_name, filter.strip())
-            try:
-                exec(filter)
-            except:
-                is_failed = True
-                break
+            if "~~" in filter:
+                filter = filter.replace("~~", "")
+                filter = '~(self.original_df["{}"]{})'.format(column_name, filter.strip())
+            else:
+                filter = '(self.original_df["{}"]{})'.format(column_name, filter.strip())
             query_list.append(filter)
-        if not is_failed:
-            return query_list
-        else:
-            return ['(self.original_df["{}"]{})'.format(column_name, filter_str)]
+        return query_list
 
     # this is the Qmodelindex http://doc.qt.io/qt-5/qmodelindex.html
     def get_bgcolor(self, index):
@@ -584,7 +577,7 @@ class DataFrameModel(QAbstractTableModel):
                         # transform the value to index of unique items
                         value = self.unique_items_col[column].index(value)
                     except ValueError:
-                        #  datetime are transformed when called by series.unique(), just ignore the cases
+                        #  datetime are transformed when called by series.unique(), cannot match with unique_items_col
                         return
                 else:
                     return
