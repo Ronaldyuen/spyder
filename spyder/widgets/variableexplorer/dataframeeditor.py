@@ -144,13 +144,8 @@ beginResetModel: When a model is reset it means that any previous data reported 
     _resizeVisibleColumnsToContents 
 
 """
-"""Layout workflow New:
-- _resizeVisibleColumnsToContents -> _resizeAllColumnsToContents 
-- 1.2 -> 
-    resizeIndexColumn
-        _resizeColumnsToContents (on index only)
-        table_level.setColumnWidth
-        _update_layout()
+"""Layout workflow New: 
+_resizeVisibleColumnsToContents -> _resizeAllColumnsToContents
 """
 
 """ Layout related problem 
@@ -163,7 +158,7 @@ Reason:
     sel_model.currentColumnChanged.connect(self._resizeCurrentColumnToContents) resizes on click
 Solution:
     2018-03-11 connect scroll bar with signal sig_resize_columns and _resizeAllColumnsToContents
-    2018-03-17 Fix COLS_TO_LOAD to load all columns, _resizeVisibleColumnsToContents -> _resizeAllColumnsToContents  
+    2018-03-17 Set COLS_TO_LOAD to load all columns, _resizeVisibleColumnsToContents -> _resizeAllColumnsToContents  
 
 Problem 2:
     Vertical scroll:
@@ -205,16 +200,12 @@ class CustomHeaderView(QHeaderView):
 
     def sizeHint(self):
         size = super().sizeHint()
-        if self._is_initialized:
-            size.setHeight(size.height() + self.CUSTOM_HEADER_HEIGHT)
+        size.setHeight(size.height() + self.CUSTOM_HEADER_HEIGHT)
         return size
 
     def updateGeometries(self):
-        if self._is_initialized:
-            self.setViewportMargins(0, 0, 0, self.CUSTOM_HEADER_HEIGHT)
-        else:
-            self.setViewportMargins(0, 0, 0, 0)
         super().updateGeometries()
+        self.setViewportMargins(0, 0, 0, self.CUSTOM_HEADER_HEIGHT)
         self.adjustPositions()
 
 
@@ -249,7 +240,7 @@ class CustomHeaderViewIndex(CustomHeaderView):
 
 
 class CustomHeaderViewEditor(CustomHeaderView):
-    filterActivated = pyqtSignal()
+    filterActivated = Signal()
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -285,7 +276,6 @@ class CustomHeaderViewEditor(CustomHeaderView):
 
 
 ############## Custom Header ########################
-
 def bool_false_check(value):
     """
     Used to convert bool entrance to false.
@@ -338,7 +328,7 @@ class DataFrameModel(QAbstractTableModel):
         self.total_cols = self.df.shape[1]
         size = self.total_rows * self.total_cols
 
-        self.unique_items_col = None
+        self.unique_items_col = [None] * self.df.shape[1]
         self.max_min_col = None
         if size < self.LARGE_SIZE:
             self.unique_col_update()
@@ -417,15 +407,10 @@ class DataFrameModel(QAbstractTableModel):
         if ax.name:
             return ax.name
 
-    # TODO: with this logic, we should disable global min max
-    # always run this before max min
     def unique_col_update(self, col_idx=None):
         """return list of sorted unique values of each column, None for unhashable values"""
         if self.df.shape[0] == 0:  # If no rows to compute max/min then return
             return
-        # initialize
-        if self.unique_items_col is None:
-            self.unique_items_col = [None] * self.df.shape[1]
         for idx, col in enumerate(self.df):
             if col_idx is None or (col_idx is not None and col_idx == idx):
                 try:
@@ -510,7 +495,6 @@ class DataFrameModel(QAbstractTableModel):
             if result is not None:
                 query_list.extend(result)
         query_text = '& '.join(query_list)
-        # TODO: support startswith
         if query_text == '':
             self.df = self.original_df
             self.filtered_text = ''
@@ -537,12 +521,12 @@ class DataFrameModel(QAbstractTableModel):
         if filter_str == '':
             return
         filter_str = filter_str.replace("^^", ".str.startswith")
-        # try split with "," if fail return full_str
         filters = filter_str.split("||")
         column_name = str(self.original_df.columns[idx])
         query_list = []
         for filter in filters:
             if "~~" in filter:
+                # not logic
                 filter = filter.replace("~~", "")
                 filter = '~(self.original_df["{}"]{})'.format(column_name, filter.strip())
             else:
@@ -752,7 +736,6 @@ class DataFrameModel(QAbstractTableModel):
 
     def rowCount(self, index=QModelIndex()):
         """DataFrame row number"""
-        # TODO: check interaction with filter
         if self.total_rows <= self.rows_loaded:
             return self.total_rows
         else:
@@ -1207,6 +1190,8 @@ class DataFrameEditor(QDialog):
         return False if data is not supported, True otherwise.
         Supported types for data are DataFrame, Series and Index.
         """
+        # TODO: block multi index
+        # TODOL block empty index
         self._selection_rec = False
         self._model = None
 
