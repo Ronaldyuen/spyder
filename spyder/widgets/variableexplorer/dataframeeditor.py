@@ -880,8 +880,8 @@ class DataFrameView(QTableView):
     def sortByColumn(self, index):
         """Implement a column sort."""
         if self.sort_old == [None]:
-            self.header_class.setSortIndicatorShown(True) \
-                # the arrow in header
+            self.header_class.setSortIndicatorShown(True)
+            # the arrow in header
         sort_order = self.header_class.sortIndicatorOrder()
         self.sig_sort_by_column.emit()
         if not self.model().sort(index, sort_order):
@@ -1200,7 +1200,7 @@ class DataFrameEditor(QDialog):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(self.layout)
         self.setWindowIcon(ima.icon('arredit'))
-        # title = name of the dataframe in spyder
+        # title = name of the dataframe in python
         self.df_name = title if title else "df"
         if title:
             title = to_text_string(title) + " - %s" % data.__class__.__name__
@@ -1748,11 +1748,15 @@ class DataFrameEditor(QDialog):
             if selected_idx and idx not in selected_idx:
                 continue
             try:
-                plt.plot(df[col])
+                plt.plot(df[col], label=list(df)[idx])
                 is_anything_plotted = True
             except ValueError:
                 pass
-        plt.show() if is_anything_plotted else plt.close()
+        if not is_anything_plotted:
+            plt.close()
+        else:
+            plt.legend()
+            plt.show()
 
     def handleFilterActivated(self):
         self.set_filter(self.custom_header_view.getText())
@@ -1762,8 +1766,6 @@ class DataFrameEditor(QDialog):
 # ==============================================================================
 # Tests
 # ==============================================================================
-from spyder.widgets.variableexplorer.originaldataframeeditor import test_edit_original
-from spyder.widgets.variableexplorer.dataframeeditor3x import test_edit_3x
 
 
 def test_edit(data, title="", parent=None):
@@ -1826,8 +1828,18 @@ def test():
     # df1.set_index('Test3', inplace=True)
 
     test_wrapper(test_edit, df1, is_profiling=False)
-    # test_wrapper(test_edit_original, df1, is_profiling=False)
-    # test_wrapper(test_edit_3x, df1, is_profiling=False)
+    # from pandas import MultiIndex
+    # import numpy
+    #
+    # arrays = [numpy.array(['bar', 'bar', 'baz', 'baz',
+    #                        'foo', 'foo', 'qux', 'qux']),
+    #           numpy.array(['one', 'two', 'one', 'two',
+    #                        'one', 'two', 'one', 'two'])]
+    # tuples = list(zip(*arrays))
+    # index = MultiIndex.from_tuples(tuples, names=['first', 'second'])
+    # df = DataFrame(numpy.random.randn(6, 6), index=index[:6],
+    #               columns=index[:6])
+    # test_wrapper(test_edit, df, is_profiling=False)
 
 
 if __name__ == '__main__':
