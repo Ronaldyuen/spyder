@@ -795,6 +795,7 @@ class DataFrameView(QTableView):
     sig_fetch_more_columns = Signal()
     sig_fetch_more_rows = Signal()
     sig_plot = Signal()
+    sig_subplot = Signal()
 
     def __init__(self, parent, model, header, hscroll, vscroll):
         """Constructor."""
@@ -909,11 +910,15 @@ class DataFrameView(QTableView):
                                     icon=ima.icon('plot'),
                                     triggered=self.sig_plot,
                                     context=Qt.WidgetShortcut)
+        subplot_action = create_action(self, _('Plot selected columns with sublplots'),
+                                       icon=ima.icon('plot'),
+                                       triggered=self.sig_subplot,
+                                       context=Qt.WidgetShortcut)
         functions = ((_("To bool"), bool), (_("To complex"), complex),
                      (_("To int"), int), (_("To float"), float),
                      (_("To str"), to_text_string))
         types_in_menu = [copy_action]
-        types_in_menu += [plot_action]
+        types_in_menu += [plot_action, subplot_action]
         for name, func in functions:
             slot = lambda func=func: self.change_type(func)
             types_in_menu += [create_action(self, name,
@@ -1391,6 +1396,7 @@ class DataFrameEditor(QDialog):
         self.dataTable.sig_fetch_more_columns.connect(self._fetch_more_columns)
         self.dataTable.sig_fetch_more_rows.connect(self._fetch_more_rows)
         self.dataTable.sig_plot.connect(self.plot_selected_columns)
+        self.dataTable.sig_subplot.connect(self.plot_selected_columns_subplot)
 
     def sortByIndex(self, index):
         """Implement a Index sort."""
@@ -1733,13 +1739,14 @@ class DataFrameEditor(QDialog):
         # reset size of other views
         self.setModel(self.dataTable.model(), relayout=False)
 
-    def plot_selected_columns(self):
+    def plot_selected_columns(self, is_subplot=False):
         import spyder.pyplot as plt
         # check selected Index
-        selected_idx = [x.column() for x in self.dataTable.selectedIndexes()]
+        selected_idx = set([x.column() for x in self.dataTable.selectedIndexes()])
         df = self.dataModel.df
         plt.figure()
         is_anything_plotted = False
+        plot_count = 1
         for idx, col in enumerate(df):
             # filter non numbers
             if df[col].dtype not in REAL_NUMBER_TYPES + COMPLEX_NUMBER_TYPES:
@@ -1748,15 +1755,25 @@ class DataFrameEditor(QDialog):
             if selected_idx and idx not in selected_idx:
                 continue
             try:
-                plt.plot(df[col], label=list(df)[idx])
+                if not is_subplot:
+                    plt.plot(df[col], label=list(df)[idx])
+                else:
+                    plt.subplot(len(selected_idx), 1, plot_count)
+                    plt.plot(df[col])
+                    plt.legend(loc='upper right')
+                    plot_count += 1
                 is_anything_plotted = True
             except ValueError:
                 pass
         if not is_anything_plotted:
             plt.close()
         else:
+            plt.tight_layout()
             plt.legend()
             plt.show()
+
+    def plot_selected_columns_subplot(self):
+        self.plot_selected_columns(is_subplot=True)
 
     def handleFilterActivated(self):
         self.set_filter(self.custom_header_view.getText())
