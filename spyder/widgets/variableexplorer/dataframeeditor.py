@@ -498,15 +498,15 @@ class DataFrameModel(QAbstractTableModel):
         if query_text == '':
             self.df = self.original_df
             self.filtered_text = ''
-            return
-        core_exec_text = 'self.original_df[{}]'.format(query_text)
-        exec_text = 'self.df = ' + core_exec_text + '.copy()'
-        try:
-            exec(exec_text)
-        except:
-            QMessageBox.critical(self.dialog, _("Error"), traceback.format_exc())
-            return
-        self.filtered_text = core_exec_text.replace('self.original_df', df_name)
+        else:
+            core_exec_text = 'self.original_df[{}]'.format(query_text)
+            exec_text = 'self.df = ' + core_exec_text + '.copy()'
+            try:
+                exec(exec_text)
+            except:
+                QMessageBox.critical(self.dialog, _("Error"), traceback.format_exc())
+                return
+            self.filtered_text = core_exec_text.replace('self.original_df', df_name)
         # reset total rows
         self.total_rows = self.df.shape[0]
         # update color after filter
