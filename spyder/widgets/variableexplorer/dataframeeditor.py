@@ -274,6 +274,10 @@ class CustomHeaderViewEditor(CustomHeaderView):
     def getText(self):
         return [self._editors[index].text() for index in range(0, len(self._editors))]
 
+    def clearText(self):
+        for index in range(0, len(self._editors)):
+            self._editors[index].setText('')
+
 
 ############## Custom Header ########################
 def bool_false_check(value):
@@ -531,6 +535,7 @@ class DataFrameModel(QAbstractTableModel):
                 filter = '~(self.original_df["{}"]{})'.format(column_name, filter.strip())
             else:
                 filter = '(self.original_df["{}"]{})'.format(column_name, filter.strip())
+            # TODO: choose between & or |
             query_list.append(filter)
         return query_list
 
@@ -1281,6 +1286,10 @@ class DataFrameEditor(QDialog):
         btn_layout.addWidget(btn)
         btn.clicked.connect(self.plot_selected_columns)
 
+        btn = QPushButton(_('Reset'))
+        btn_layout.addWidget(btn)
+        btn.clicked.connect(self.reset_filter)
+
         bgcolor = QCheckBox(_('Background color'))
         bgcolor.setChecked(self.dataModel.bgcolor_enabled)
         bgcolor.setEnabled(self.dataModel.bgcolor_enabled)
@@ -1778,6 +1787,10 @@ class DataFrameEditor(QDialog):
     def handleFilterActivated(self):
         self.set_filter(self.custom_header_view.getText())
         self.textbox.setText(self.dataModel.filtered_text)
+
+    def reset_filter(self):
+        self.custom_header_view.clearText()
+        self.handleFilterActivated()
 
 
 # ==============================================================================
