@@ -801,6 +801,7 @@ class DataFrameView(QTableView):
     sig_fetch_more_rows = Signal()
     sig_plot = Signal()
     sig_subplot = Signal()
+    sig_reset_and_scroll_to = Signal()
 
     def __init__(self, parent, model, header, hscroll, vscroll):
         """Constructor."""
@@ -919,11 +920,15 @@ class DataFrameView(QTableView):
                                        icon=ima.icon('plot'),
                                        triggered=self.sig_subplot,
                                        context=Qt.WidgetShortcut)
+        reset_action = create_action(self, _('Reset and scroll to'),
+                                     icon=ima.icon('restore'),
+                                     triggered=self.sig_reset_and_scroll_to,
+                                     context=Qt.WidgetShortcut)
         functions = ((_("To bool"), bool), (_("To complex"), complex),
                      (_("To int"), int), (_("To float"), float),
                      (_("To str"), to_text_string))
         types_in_menu = [copy_action]
-        types_in_menu += [plot_action, subplot_action]
+        types_in_menu += [plot_action, subplot_action, reset_action]
         for name, func in functions:
             slot = lambda func=func: self.change_type(func)
             types_in_menu += [create_action(self, name,
@@ -1286,7 +1291,7 @@ class DataFrameEditor(QDialog):
         btn_layout.addWidget(btn)
         btn.clicked.connect(self.plot_selected_columns)
 
-        btn = QPushButton(_('Reset'))
+        btn = QPushButton(_('Reset Filter'))
         btn_layout.addWidget(btn)
         btn.clicked.connect(self.reset_filter)
 
@@ -1406,6 +1411,7 @@ class DataFrameEditor(QDialog):
         self.dataTable.sig_fetch_more_rows.connect(self._fetch_more_rows)
         self.dataTable.sig_plot.connect(self.plot_selected_columns)
         self.dataTable.sig_subplot.connect(self.plot_selected_columns_subplot)
+        self.dataTable.sig_reset_and_scroll_to.connect(self.reset_and_scroll_to)
 
     def sortByIndex(self, index):
         """Implement a Index sort."""
@@ -1791,6 +1797,20 @@ class DataFrameEditor(QDialog):
     def reset_filter(self):
         self.custom_header_view.clearText()
         self.handleFilterActivated()
+
+    def reset_and_scroll_to(self):
+        selected_row_list = set([x.row() for x in self.dataTable.selectedIndexes()])
+        if len(selected_row_list) > 1:
+            QMessageBox.critical(self, "Error", "Only one row should be selected.")
+            return
+        selected_index = self.dataModel.df.index[next(iter(selected_row_list))]
+        original_row_num = self.dataModel.original_df.index.get_loc(selected_index)
+        self.reset_filter()
+        self.dataTable.scroll_to_and_select(original_row_num, 0)
+        # non unique if not integer
+        # TODO warning if more than 1 column selected
+        # TODO find a way to select exact index
+        pass
 
 
 # ==============================================================================
