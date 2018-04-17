@@ -1771,7 +1771,7 @@ class DataFrameEditor(QDialog):
                 continue
             try:
                 if not is_subplot:
-                    plt.plot(df[col], label=list(df)[idx])
+                    plt.plot(df[col], label=list(df)[idx], alpha = 0.6)
                 else:
                     plt.subplot(len(selected_idx), 1, plot_count)
                     plt.plot(df[col])
@@ -1783,6 +1783,7 @@ class DataFrameEditor(QDialog):
         if not is_anything_plotted:
             plt.close()
         else:
+            plt.xticks(rotation=90)
             plt.tight_layout()
             plt.legend()
             plt.show()
