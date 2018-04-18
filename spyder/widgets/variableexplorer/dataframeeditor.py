@@ -900,6 +900,10 @@ class DataFrameView(QTableView):
             return
         self.sort_old = [index, self.header_class.sortIndicatorOrder()]
 
+    def reset_sort_indicator(self):
+        self.header_class.setSortIndicatorShown(False)
+        self.sort_old = [None]
+
     def contextMenuEvent(self, event):
         """Reimplement Qt method."""
         self.menu.popup(event.globalPos())
@@ -1419,6 +1423,8 @@ class DataFrameEditor(QDialog):
         sort_order = self.table_level.horizontalHeader().sortIndicatorOrder()
         self.table_index.model().sort(index, sort_order)
         self._sort_update()
+        self.dataTable.reset_sort_indicator()
+        # TODO fix other direction of reset
 
     def model(self):
         """Get the model of the dataframe."""
