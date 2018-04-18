@@ -417,12 +417,14 @@ class DataFrameModel(QAbstractTableModel):
             return
         for idx, col in enumerate(self.df):
             if col_idx is None or (col_idx is not None and col_idx == idx):
+                unique_items = None
                 try:
-                    unique_items = self.df[col].unique()
-                    self.unique_items_col[idx] = sorted(unique_items)
-                # unhashable values
+                    unique_items = self.df[col].unique().tolist()
+                    unique_items = sorted(unique_items)
                 except TypeError:
+                    # unhashable values OR mixed data type could not be sorted
                     pass
+                self.unique_items_col[idx] = unique_items
 
     def max_min_col_update(self):
         """
@@ -443,7 +445,7 @@ class DataFrameModel(QAbstractTableModel):
         for idx, (_, col) in enumerate(self.df.iteritems()):
             vmax = vmin = None  # set default values
             unique_items = self.unique_items_col[idx]  # check unique items
-            if unique_items:
+            if unique_items is not None:
                 # set min_max to None (no color) for single value column
                 if len(unique_items) == 1:
                     continue
@@ -454,7 +456,7 @@ class DataFrameModel(QAbstractTableModel):
                 vmax = col.abs().max(skipna=True)
                 vmin = col.abs().min(skipna=True)
             else:
-                if unique_items:
+                if unique_items is not None:
                     if len(unique_items) < self.UNIQUE_ITEM_THRESHOLD:
                         vmax = len(unique_items) - 1
                         vmin = 0
@@ -561,7 +563,7 @@ class DataFrameModel(QAbstractTableModel):
             # other objects, just like int
             else:
                 color_func = float
-                if self.unique_items_col[column]:
+                if self.unique_items_col[column] is not None:
                     try:
                         # transform the value to index of unique items
                         value = self.unique_items_col[column].index(value)
@@ -1862,6 +1864,8 @@ def test():
     import random
     import datetime
     string_list = ['AAAA', 'BBBBB', 'CCCCCCC', 'DDDDDDDD', 'EEEEEEE']
+    string_list_2 = ['AAAA', 'BBBBB', np.nan]
+    variety_list = ['AAAA', 1, np.nan]
     datetime_list = [datetime.datetime(2018, 1, 1, 1, 1, 1), datetime.datetime(2022, 2, 2, 2, 2, 2)]
     true_false_list = [True, False]
     nrow = 100000
@@ -1874,8 +1878,9 @@ def test():
     df1['really_long_column_name_2'] = df1['Test']
     df1['Test6'] = "Test"
     df1['Test7'] = 5
+    df1 = df1.join([DataFrame([r.choice(variety_list) for _ in range(nrow)], columns=['variety_list'])])
     df1 = df1.join([DataFrame([r.choice(true_false_list) for _ in range(nrow)], columns=['true_false_list'])])
-    df1 = df1.join([DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['string_list_2'])])
+    df1 = df1.join([DataFrame([r.choice(string_list_2) for _ in range(nrow)], columns=['string_list_2'])])
     df1 = df1.join([DataFrame([r.choice(datetime_list) for _ in range(nrow)], columns=['date_time'])])
     df1 = df1.join([DataFrame(np.random.rand(nrow, 10), columns=list(map(chr, range(97, 107))))])
     df1.loc[1, 'a'] = float('nan')
