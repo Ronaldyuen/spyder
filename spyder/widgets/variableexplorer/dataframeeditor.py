@@ -335,8 +335,7 @@ class DataFrameModel(QAbstractTableModel):
         self.unique_items_col = [None] * self.df.shape[1]
         self.max_min_col = None
         if size < self.LARGE_SIZE:
-            self.unique_col_update()
-            self.max_min_col_update()
+            self.update_df_features()
             self.colum_avg_enabled = True
             self.bgcolor_enabled = True
             self.colum_avg(1)
@@ -515,9 +514,7 @@ class DataFrameModel(QAbstractTableModel):
             self.filtered_text = core_exec_text.replace('self.original_df', df_name)
         # reset total rows
         self.total_rows = self.df.shape[0]
-        # update color after filter
-        self.unique_col_update()
-        self.max_min_col_update()
+        self.update_df_features()
         self.reset()
 
     def _get_query_list(self, idx, filter_str):
@@ -733,8 +730,7 @@ class DataFrameModel(QAbstractTableModel):
                                      "Editing dtype {0!s} not yet supported."
                                      .format(type(current_value).__name__))
                 return False
-        self.unique_col_update(col_idx=column)
-        self.max_min_col_update()
+        self.update_df_features(col_idx=column)
         return True
 
     def get_data(self):
@@ -780,6 +776,15 @@ class DataFrameModel(QAbstractTableModel):
     def reset(self):
         self.beginResetModel()
         self.endResetModel()
+
+    def update_df_features(self, col_idx=None):
+        self.unique_col_update(col_idx)
+        self.max_min_col_update()
+
+    def reset_filter(self):
+        self.df = self.original_df
+        self.update_df_features()
+        self.reset()
 
     def set_rows_to_load(self, rows_to_load):
         self.ROWS_TO_LOAD = rows_to_load
@@ -1779,7 +1784,7 @@ class DataFrameEditor(QDialog):
                 continue
             try:
                 if not is_subplot:
-                    plt.plot(df[col], label=list(df)[idx], alpha = 0.6)
+                    plt.plot(df[col], label=list(df)[idx], alpha=0.6)
                 else:
                     plt.subplot(len(selected_idx), 1, plot_count)
                     plt.plot(df[col])
@@ -1805,7 +1810,7 @@ class DataFrameEditor(QDialog):
 
     def reset_filter(self):
         self.custom_header_view.clearText()
-        self.handleFilterActivated()
+        self.dataModel.reset_filter()
 
     def reset_and_scroll_to(self):
         selected_row_list = set([x.row() for x in self.dataTable.selectedIndexes()])
