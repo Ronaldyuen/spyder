@@ -323,6 +323,8 @@ class DataFrameModel(QAbstractTableModel):
         self.dialog = parent
         self.df = dataFrame
         self.original_df = dataFrame.copy()
+        self.idx_tracker = pd.Series(range(len(self.df)), dtype=int)
+        self._INDEX_TRACKER_NAME = '__INDEX_TRACKER'
         self.df_index = dataFrame.index.tolist()
         self.df_header = dataFrame.columns.tolist()
         self._format = format
@@ -418,6 +420,7 @@ class DataFrameModel(QAbstractTableModel):
             if col_idx is None or (col_idx is not None and col_idx == idx):
                 unique_items = None
                 try:
+                    # TODO maybe check unique size first?
                     unique_items = self.df[col].unique().tolist()
                     unique_items = sorted(unique_items)
                 except TypeError:
@@ -501,17 +504,23 @@ class DataFrameModel(QAbstractTableModel):
                 query_list.extend(result)
         query_text = '& '.join(query_list)
         if query_text == '':
-            self.df = self.original_df
+            # empty filter
+            self.df = self.original_df.copy()
             self.filtered_text = ''
+            self.idx_tracker = pd.Series(range(len(self.original_df)), dtype=int)
         else:
+            self.set_index_tracker(self.original_df)
             core_exec_text = 'self.original_df[{}]'.format(query_text)
             exec_text = 'self.df = ' + core_exec_text + '.copy()'
             try:
                 exec(exec_text)
             except:
                 QMessageBox.critical(self.dialog, _("Error"), traceback.format_exc())
+                self.remove_index_tracker(self.original_df, is_update=False)
                 return
             self.filtered_text = core_exec_text.replace('self.original_df', df_name)
+            self.remove_index_tracker(self.original_df, is_update=False)
+            self.remove_index_tracker(self.df)
         # reset total rows
         self.total_rows = self.df.shape[0]
         self.update_df_features()
@@ -634,6 +643,7 @@ class DataFrameModel(QAbstractTableModel):
                                      "TypeError error: no ordering "
                                      "relation is defined for complex numbers")
                 return False
+        self.set_index_tracker(self.df)
         try:
             ascending = order == Qt.AscendingOrder
             if column >= 0:
@@ -662,8 +672,9 @@ class DataFrameModel(QAbstractTableModel):
         except TypeError as e:
             QMessageBox.critical(self.dialog, "Error",
                                  "TypeError error: %s" % str(e))
+            self.remove_index_tracker(self.df, is_update=False)
             return False
-
+        self.remove_index_tracker(self.df)
         self.reset()
         return True
 
@@ -782,7 +793,8 @@ class DataFrameModel(QAbstractTableModel):
         self.max_min_col_update()
 
     def reset_filter(self):
-        self.df = self.original_df
+        self.df = self.original_df.copy()
+        self.idx_tracker = pd.Series(range(len(self.original_df)), dtype=int)
         self.update_df_features()
         self.reset()
 
@@ -791,6 +803,14 @@ class DataFrameModel(QAbstractTableModel):
 
     def set_cols_to_load(self, cols_to_load):
         self.COLS_TO_LOAD = cols_to_load
+
+    def set_index_tracker(self, df):
+        df[self._INDEX_TRACKER_NAME] = self.idx_tracker
+
+    def remove_index_tracker(self, df, is_update=True):
+        if is_update:
+            self.idx_tracker = df[self._INDEX_TRACKER_NAME]
+        df.drop(self._INDEX_TRACKER_NAME, axis=1, inplace=True)
 
 
 class DataFrameView(QTableView):
@@ -1817,14 +1837,13 @@ class DataFrameEditor(QDialog):
         if len(selected_row_list) > 1:
             QMessageBox.critical(self, "Error", "Only one row should be selected.")
             return
-        selected_index = self.dataModel.df.index[next(iter(selected_row_list))]
-        original_row_num = self.dataModel.original_df.index.get_loc(selected_index)
+        picked_row_rel_to_original_df = self.dataModel.idx_tracker.iloc[next(iter(selected_row_list))]
+        print(picked_row_rel_to_original_df)
         self.reset_filter()
-        self.dataTable.scroll_to_and_select(original_row_num, 0)
+        self.dataTable.scroll_to_and_select(picked_row_rel_to_original_df, 0)
+        # check index
         # non unique if not integer
         # TODO warning if more than 1 column selected
-        # TODO find a way to select exact index
-        pass
 
 
 # ==============================================================================
@@ -1876,7 +1895,7 @@ def test():
     nrow = 100000
     r = random.Random(502)
     df1 = DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['Test'])
-    df1['Test2'] = 1
+    df1['num'] = range(nrow)
     df1.loc[8, 'Test2'] = float('nan')
     df1['Test3'] = df1['Test']
     df1['really_long_column_name_1'] = df1['Test']
