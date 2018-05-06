@@ -323,7 +323,7 @@ class DataFrameModel(QAbstractTableModel):
         self.dialog = parent
         self.df = dataFrame
         self.original_df = dataFrame.copy()
-        self.idx_tracker = pd.Series(range(len(self.df)), dtype=int)
+        self.idx_tracker = None
         self._INDEX_TRACKER_NAME = '__INDEX_TRACKER'
         self.df_index = dataFrame.index.tolist()
         self.df_header = dataFrame.columns.tolist()
@@ -507,9 +507,9 @@ class DataFrameModel(QAbstractTableModel):
             # empty filter
             self.df = self.original_df.copy()
             self.filtered_text = ''
-            self.idx_tracker = pd.Series(range(len(self.original_df)), dtype=int)
+            self.idx_tracker = None
         else:
-            self.set_index_tracker(self.original_df)
+            self.set_index_tracker(self.original_df, is_reset=True)
             core_exec_text = 'self.original_df[{}]'.format(query_text)
             exec_text = 'self.df = ' + core_exec_text + '.copy()'
             try:
@@ -520,7 +520,7 @@ class DataFrameModel(QAbstractTableModel):
                 return
             self.filtered_text = core_exec_text.replace('self.original_df', df_name)
             self.remove_index_tracker(self.original_df, is_update=False)
-            self.remove_index_tracker(self.df)
+            self.remove_index_tracker(self.df, is_update=True)
         # reset total rows
         self.total_rows = self.df.shape[0]
         self.update_df_features()
@@ -643,7 +643,7 @@ class DataFrameModel(QAbstractTableModel):
                                      "TypeError error: no ordering "
                                      "relation is defined for complex numbers")
                 return False
-        self.set_index_tracker(self.df)
+        self.set_index_tracker(self.df, is_reset=False)
         try:
             ascending = order == Qt.AscendingOrder
             if column >= 0:
@@ -674,7 +674,7 @@ class DataFrameModel(QAbstractTableModel):
                                  "TypeError error: %s" % str(e))
             self.remove_index_tracker(self.df, is_update=False)
             return False
-        self.remove_index_tracker(self.df)
+        self.remove_index_tracker(self.df, is_update=True)
         self.reset()
         return True
 
@@ -794,7 +794,7 @@ class DataFrameModel(QAbstractTableModel):
 
     def reset_filter(self):
         self.df = self.original_df.copy()
-        self.idx_tracker = pd.Series(range(len(self.original_df)), dtype=int)
+        self.idx_tracker = None
         self.update_df_features()
         self.reset()
 
@@ -804,10 +804,14 @@ class DataFrameModel(QAbstractTableModel):
     def set_cols_to_load(self, cols_to_load):
         self.COLS_TO_LOAD = cols_to_load
 
-    def set_index_tracker(self, df):
-        df[self._INDEX_TRACKER_NAME] = self.idx_tracker
+    def set_index_tracker(self, df, is_reset):
+        if self.idx_tracker is None or is_reset:
+            df[self._INDEX_TRACKER_NAME] = range(len(df))
+        else:
+            # when index is duplicated,  set directly would not work
+            df[self._INDEX_TRACKER_NAME] = self.idx_tracker.values
 
-    def remove_index_tracker(self, df, is_update=True):
+    def remove_index_tracker(self, df, is_update):
         if is_update:
             self.idx_tracker = df[self._INDEX_TRACKER_NAME]
         df.drop(self._INDEX_TRACKER_NAME, axis=1, inplace=True)
@@ -1111,8 +1115,8 @@ class DataFrameHeaderModel(QAbstractTableModel):
         This is used when a header has levels.
         """
         if not index.isValid() or \
-                        index.row() >= self._shape[0] or \
-                        index.column() >= self._shape[1]:
+                index.row() >= self._shape[0] or \
+                index.column() >= self._shape[1]:
             return None
         row, col = ((index.row(), index.column()) if self.axis == 0
                     else (index.column(), index.row()))
@@ -1911,7 +1915,7 @@ def test():
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
     df1 = df1.join([DataFrame([{'F': [1, 2, 3, 4]}])])
     df1['super_super_super_unacceptable_long_column_name_that_should_not_happen'] = df1['Test']
-    # df1.set_index('Test3', inplace=True)
+    df1.set_index('date_time', inplace=True)
 
     test_wrapper(test_edit, df1, is_profiling=False)
     # from pandas import MultiIndex
