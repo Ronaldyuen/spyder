@@ -274,7 +274,7 @@ class CustomHeaderViewEditor(CustomHeaderView):
     def getText(self):
         return [self._editors[index].text() for index in range(0, len(self._editors))]
 
-    def clearText(self):
+    def _clearFilterText(self):
         for index in range(0, len(self._editors)):
             self._editors[index].setText('')
 
@@ -791,12 +791,6 @@ class DataFrameModel(QAbstractTableModel):
     def update_df_features(self, col_idx=None):
         self.unique_col_update(col_idx)
         self.max_min_col_update()
-
-    def reset_filter(self):
-        self.df = self.original_df.copy()
-        self.idx_tracker = None
-        self.update_df_features()
-        self.reset()
 
     def set_rows_to_load(self, rows_to_load):
         self.ROWS_TO_LOAD = rows_to_load
@@ -1833,8 +1827,8 @@ class DataFrameEditor(QDialog):
         self.textbox.setText(self.dataModel.filtered_text)
 
     def reset_filter(self):
-        self.custom_header_view.clearText()
-        self.dataModel.reset_filter()
+        self.custom_header_view._clearFilterText()
+        self.handleFilterActivated()
 
     def reset_and_scroll_to(self):
         selected_row_list = set([x.row() for x in self.dataTable.selectedIndexes()])
