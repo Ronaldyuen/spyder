@@ -1784,6 +1784,9 @@ class DataFrameEditor(QDialog):
         self.dataModel.set_filter(filter_list, self.df_name)
         # reset size of other views
         self.setModel(self.dataTable.model(), relayout=False)
+        # reset all sort indicators
+        self._reset_sort_indicator()
+        self.dataTable._reset_sort_indicator()
 
     def plot_selected_columns(self, is_subplot=False):
         import spyder.pyplot as plt
