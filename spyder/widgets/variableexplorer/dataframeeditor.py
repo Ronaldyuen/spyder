@@ -827,6 +827,7 @@ class DataFrameView(QTableView):
     sig_plot = Signal()
     sig_subplot = Signal()
     sig_reset_and_scroll_to = Signal()
+    sig_reset_sort_indicator = Signal()
 
     def __init__(self, parent, model, header, hscroll, vscroll):
         """Constructor."""
@@ -924,8 +925,9 @@ class DataFrameView(QTableView):
                                                    self.sort_old[1])
             return
         self.sort_old = [index, self.header_class.sortIndicatorOrder()]
+        self.sig_reset_sort_indicator.emit()
 
-    def reset_sort_indicator(self):
+    def _reset_sort_indicator(self):
         self.header_class.setSortIndicatorShown(False)
         self.sort_old = [None]
 
@@ -1441,6 +1443,7 @@ class DataFrameEditor(QDialog):
         self.dataTable.sig_plot.connect(self.plot_selected_columns)
         self.dataTable.sig_subplot.connect(self.plot_selected_columns_subplot)
         self.dataTable.sig_reset_and_scroll_to.connect(self.reset_and_scroll_to)
+        self.dataTable.sig_reset_sort_indicator.connect(self._reset_sort_indicator)
 
     def sortByIndex(self, index):
         """Implement a Index sort."""
@@ -1448,8 +1451,10 @@ class DataFrameEditor(QDialog):
         sort_order = self.table_level.horizontalHeader().sortIndicatorOrder()
         self.table_index.model().sort(index, sort_order)
         self._sort_update()
-        self.dataTable.reset_sort_indicator()
-        # TODO fix other direction of reset
+        self.dataTable._reset_sort_indicator()
+
+    def _reset_sort_indicator(self):
+        self.table_level.horizontalHeader().setSortIndicatorShown(False)
 
     def model(self):
         """Get the model of the dataframe."""
