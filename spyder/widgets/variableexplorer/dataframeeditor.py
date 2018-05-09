@@ -333,6 +333,7 @@ class DataFrameModel(QAbstractTableModel):
         self.total_rows = self.df.shape[0]
         self.total_cols = self.df.shape[1]
         size = self.total_rows * self.total_cols
+        self.filtered_text = ''
 
         self.unique_items_col = [None] * self.df.shape[1]
         self.max_min_col = None
@@ -1843,10 +1844,10 @@ class DataFrameEditor(QDialog):
         if len(selected_row_list) > 1:
             QMessageBox.critical(self, "Error", "Only one row should be selected.")
             return
-        picked_row_rel_to_original_df = self.dataModel.idx_tracker.iloc[next(iter(selected_row_list))]
-        print(picked_row_rel_to_original_df)
-        self.reset_filter()
-        self.dataTable.scroll_to_and_select(picked_row_rel_to_original_df, 0)
+        if self.dataModel.idx_tracker is not None:
+            picked_row_rel_to_original_df = self.dataModel.idx_tracker.iloc[next(iter(selected_row_list))]
+            self.reset_filter()
+            self.dataTable.scroll_to_and_select(picked_row_rel_to_original_df, 0)
         # check index
         # non unique if not integer
         # TODO warning if more than 1 column selected
