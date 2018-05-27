@@ -266,6 +266,7 @@ class CustomHeaderViewEditor(CustomHeaderView):
             for index in range(count):
                 editor = QLineEdit(self.parent())
                 editor.setPlaceholderText(str(index))
+                # TODO: shift return to represent union
                 editor.returnPressed.connect(self.filterActivated.emit)
                 self._editors.append(editor)
             self._is_initialized = True
@@ -498,12 +499,12 @@ class DataFrameModel(QAbstractTableModel):
     def set_filter(self, filter_list, df_name):
         """filter self.df by the filter_list given
         just like sort, modify self.df and then reset"""
-        query_list = []
+        filter_per_column = []
         for idx, filter_str in enumerate(filter_list):
             result = self._get_query_list(idx, filter_str)
             if result is not None:
-                query_list.extend(result)
-        query_text = '& '.join(query_list)
+                filter_per_column.append(result)
+        query_text = '&'.join(filter_per_column)
         if query_text == '':
             # empty filter
             self.df = self.original_df.copy()
@@ -530,23 +531,37 @@ class DataFrameModel(QAbstractTableModel):
     def _get_query_list(self, idx, filter_str):
         """wrap filter_str with df name and column name
         with some special characters handling
+
+        (Assume "|" and "&" not present in the data)
+        Multiple logical statements within a cell (column) could be separated by "|" OR "&" which represent union OR intersection
+        They could not be present at the same time
+        Each statement should START with either the common logical operators: > < !=  ==
+        OR the special character ^ which will be replaced by .str.startswith
+        If none of the special characters present, will append == by default
+
+        Example of filter_str: 1|2  >5&<10  ^"E"
         """
+
+        def _get_handled_logic(logic_str, column_name):
+            logic_str = logic_str.strip()
+            if not logic_str.startswith((">", "<", "!=", "==", "^")):
+                logic_str = "==" + logic_str
+            else:
+                if logic_str.startswith("^"):
+                    logic_str = ".str.startswith({})".format(logic_str[1:])
+            return '(self.original_df["{}"]{})'.format(column_name, logic_str)
+
+        #####
         if filter_str == '':
             return
-        filter_str = filter_str.replace("^^", ".str.startswith")
-        filters = filter_str.split("||")
         column_name = str(self.original_df.columns[idx])
-        query_list = []
-        for filter in filters:
-            if "~~" in filter:
-                # not logic
-                filter = filter.replace("~~", "")
-                filter = '~(self.original_df["{}"]{})'.format(column_name, filter.strip())
-            else:
-                filter = '(self.original_df["{}"]{})'.format(column_name, filter.strip())
-            # TODO: choose between & or |
-            query_list.append(filter)
-        return query_list
+        assert (not ("|" in filter_str and "&" in filter_str))
+        for i in ["|", "&"]:
+            if i in filter_str:
+                multiple_logic = [_get_handled_logic(filter_str, column_name) for filter_str in filter_str.split(i)]
+                return i.join(multiple_logic)
+        else:
+            return _get_handled_logic(filter_str, column_name)
 
     # this is the Qmodelindex http://doc.qt.io/qt-5/qmodelindex.html
     def get_bgcolor(self, index):
