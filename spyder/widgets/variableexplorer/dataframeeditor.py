@@ -529,26 +529,32 @@ class DataFrameModel(QAbstractTableModel):
         self.reset()
 
     def _get_query_list(self, idx, filter_str):
-        """wrap filter_str with df name and column name
-        with some special characters handling
+        """wrap filter_str with df name and column name with special characters handling
 
-        (Assume "|" and "&" not present in the data)
-        Multiple logical statements within a cell (column) could be separated by "|" OR "&" which represent union OR intersection
+        (Assume "|" and "&" not used other than separator)
+        Multiple logical statements within a editing cell (column) could be separated by "|" OR "&" which represent union OR intersection
         They could not be present at the same time
-        Each statement should START with either the common logical operators: > < !=  ==
-        OR the special character ^ which will be replaced by .str.startswith
-        If none of the special characters present, will append == by default
+        Each statement should START with either the logical operators: > < !=  ==
+        OR the following definitions:
+        ^ : replace by .str.startswith
+        ISNAN: replace by .np.isnan()
+
+        If none of above is detected, will use == by default
 
         Example of filter_str: 1|2  >5&<10  ^"E"
         """
 
         def _get_handled_logic(logic_str, column_name):
             logic_str = logic_str.strip()
-            if not logic_str.startswith((">", "<", "!=", "==", "^")):
-                logic_str = "==" + logic_str
+            if logic_str.startswith((">", "<", "!=", "==")):
+                pass
+            elif logic_str.startswith("^"):
+                logic_str = ".str.startswith({})".format(logic_str[1:])
+            elif logic_str == "ISNAN":
+                return '(pd.isnull(self.original_df["{}"]))'.format(column_name)
             else:
-                if logic_str.startswith("^"):
-                    logic_str = ".str.startswith({})".format(logic_str[1:])
+                # default
+                logic_str = "==" + logic_str
             return '(self.original_df["{}"]{})'.format(column_name, logic_str)
 
         #####
