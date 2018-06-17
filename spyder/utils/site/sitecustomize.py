@@ -242,6 +242,8 @@ if os.environ["QT_API"] == 'pyqt':
             sip.setapi(qtype, 2)
     except:
         pass
+else:
+    os.environ.pop('QT_API')
 
 
 #==============================================================================
@@ -298,6 +300,21 @@ try:
     # For 0.18.1+
     warnings.filterwarnings(action='ignore', category=RuntimeWarning,
                             module='pandas.formats.format',
+                            message=".*invalid value encountered in.*")
+except:
+    pass
+
+
+# =============================================================================
+# Numpy adjustments
+# =============================================================================
+try:
+    # Filter warning that appears when users have 'Show max/min'
+    # turned on and Numpy arrays contain a nan value.
+    # Fixes Issue 7063
+    # Note: It only happens in Numpy 1.14+
+    warnings.filterwarnings(action='ignore', category=RuntimeWarning,
+                            module='numpy.core._methods',
                             message=".*invalid value encountered in.*")
 except:
     pass
@@ -473,7 +490,8 @@ def reset(self):
 #     specific behaviour desired?)
 @monkeypatch_method(pdb.Pdb, 'Pdb')
 def postcmd(self, stop, line):
-    self.notify_spyder(self.curframe)
+    if line != "!get_ipython().kernel._set_spyder_breakpoints()":
+        self.notify_spyder(self.curframe)
     return self._old_Pdb_postcmd(stop, line)
 
 
@@ -538,7 +556,16 @@ class UserModuleReloader(object):
             namelist = []
         spy_modules = ['sitecustomize', 'spyder', 'spyderplugins']
         mpl_modules = ['matplotlib', 'tkinter', 'Tkinter']
-        self.namelist = namelist + spy_modules + mpl_modules
+        # Add other, necessary modules to the UMR blacklist
+        # astropy: see issue 6962
+        # pytorch: see issue 7041
+        # fastmat: see issue 7190
+        # pythoncom: see issue 7190
+        other_modules = ['pytorch', 'pythoncom']
+        if PY2:
+            py2_modules = ['astropy', 'fastmat']
+            other_modules = other_modules + py2_modules
+        self.namelist = namelist + spy_modules + mpl_modules + other_modules
 
         if pathlist is None:
             pathlist = []

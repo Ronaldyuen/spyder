@@ -19,7 +19,6 @@ import sys
 from collections import MutableSequence
 
 # Third party imports
-from qtpy import is_pyqt46
 from qtpy.compat import getsavefilename
 from qtpy.QtCore import (QByteArray, QFileInfo, QObject, QPoint, QSize, Qt,
                          QThread, QTimer, Signal, Slot)
@@ -844,8 +843,6 @@ class EditorStack(QWidget):
                 self.outlineexplorer.remove_editor(finfo.editor)
 
         QWidget.closeEvent(self, event)
-        if is_pyqt46:
-            self.destroyed.emit()
 
     def clone_editor_from(self, other_finfo, set_current):
         fname = other_finfo.filename
@@ -1720,7 +1717,7 @@ class EditorStack(QWidget):
         except EnvironmentError as error:
             self.msgbox = QMessageBox(
                     QMessageBox.Critical,
-                    _("Save"),
+                    _("Save Error"),
                     _("<b>Unable to save file '%s'</b>"
                       "<br><br>Error message:<br>%s"
                       ) % (osp.basename(finfo.filename),
@@ -1883,7 +1880,7 @@ class EditorStack(QWidget):
             except EnvironmentError as error:
                 self.msgbox = QMessageBox(
                     QMessageBox.Critical,
-                    _("Save"),
+                    _("Save Error"),
                     _("<b>Unable to save file '%s'</b>"
                       "<br><br>Error message:<br>%s"
                       ) % (osp.basename(finfo.filename),
@@ -2571,8 +2568,6 @@ class EditorSplitter(QSplitter):
         receives a window close request from a top-level widget.
         """
         QSplitter.closeEvent(self, event)
-        if is_pyqt46:
-            self.destroyed.emit()
 
     def __give_focus_to_remaining_editor(self):
         focus_widget = self.plugin.get_focus_widget()
@@ -2918,12 +2913,6 @@ class EditorMainWindow(QMainWindow):
     def closeEvent(self, event):
         """Reimplement Qt method"""
         QMainWindow.closeEvent(self, event)
-        if is_pyqt46:
-            self.destroyed.emit()
-            for editorstack in self.editorwidget.editorstacks[:]:
-                if DEBUG_EDITOR:
-                    print("--> destroy_editorstack:", editorstack, file=STDOUT)
-                editorstack.destroyed.emit()
 
     def get_layout_settings(self):
         """Return layout state"""
