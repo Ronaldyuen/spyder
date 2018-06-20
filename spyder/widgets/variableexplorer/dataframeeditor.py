@@ -551,6 +551,8 @@ class DataFrameModel(QAbstractTableModel):
                 logic_str = ".str.startswith({})".format(logic_str[1:])
             elif logic_str == "ISNAN":
                 return '(pd.isnull(self.original_df["{}"]))'.format(column_name)
+            elif logic_str == "!ISNAN":
+                return '(~pd.isnull(self.original_df["{}"]))'.format(column_name)
             else:
                 # default
                 logic_str = "==" + logic_str
