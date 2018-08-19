@@ -1842,13 +1842,10 @@ class DataFrameEditor(QDialog):
         self.dataTable._reset_sort_indicator()
 
     def plot_selected_columns(self, is_subplot=False):
-        import spyder.pyplot as plt
         # check selected Index
         selected_idx = set([x.column() for x in self.dataTable.selectedIndexes()])
         df = self.dataModel.df
-        plt.figure()
-        is_anything_plotted = False
-        plot_count = 1
+        plot_list = []
         for idx, col in enumerate(df):
             # filter non numbers
             if df[col].dtype not in REAL_NUMBER_TYPES + COMPLEX_NUMBER_TYPES:
@@ -1856,24 +1853,45 @@ class DataFrameEditor(QDialog):
             # filter not selected
             if selected_idx and idx not in selected_idx:
                 continue
-            try:
-                if not is_subplot:
-                    plt.plot(df[col], label=list(df)[idx], alpha=0.6)
-                else:
-                    plt.subplot(len(selected_idx), 1, plot_count)
-                    plt.plot(df[col])
-                    plt.legend(loc='upper right')
-                    plot_count += 1
-                is_anything_plotted = True
-            except ValueError:
-                pass
-        if not is_anything_plotted:
-            plt.close()
+            plot_list.append((df[col], df.columns[idx]))
+        # import plotting libraries
+        try:
+            import plotly
+            use_plotly = True
+        except ImportError:
+            use_plotly = False
+        if use_plotly:
+            from plotly.offline import plot
+            import plotly.graph_objs as go
+            trace_list = []
+            for y, name in plot_list:
+                trace_list.append(go.Scatter(x=df.index, y=y, name=name))
+            fig = go.Figure(trace_list)
+            plot(fig)
         else:
-            plt.xticks(rotation=90)
-            plt.tight_layout()
-            plt.legend()
-            plt.show()
+            import spyder.pyplot as plt
+            plt.figure()
+            is_anything_plotted = False
+            plot_count = 1
+            for y, name in plot_list:
+                try:
+                    if not is_subplot:
+                        plt.plot(y, label=name, alpha=0.6)
+                    else:
+                        plt.subplot(len(selected_idx), 1, plot_count)
+                        plt.plot(y)
+                        plt.legend(loc='upper right')
+                        plot_count += 1
+                    is_anything_plotted = True
+                except ValueError:
+                    pass
+            if not is_anything_plotted:
+                plt.close()
+            else:
+                plt.xticks(rotation=90)
+                plt.tight_layout()
+                plt.legend()
+                plt.show()
 
     def plot_selected_columns_subplot(self):
         self.plot_selected_columns(is_subplot=True)
