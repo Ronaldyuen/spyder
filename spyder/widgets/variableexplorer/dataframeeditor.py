@@ -1866,7 +1866,7 @@ class DataFrameEditor(QDialog):
             trace_list = []
             for y, name in plot_list:
                 trace_list.append(go.Scatter(x=df.index, y=y, name=name))
-            fig = go.Figure(trace_list)
+            fig = go.Figure(data=trace_list)
             plot(fig)
         else:
             import spyder.pyplot as plt
