@@ -616,9 +616,6 @@ class DataFrameModel(QAbstractTableModel):
             hue = (BACKGROUND_NUMBER_MINHUE + BACKGROUND_NUMBER_HUERANGE *
                    (vmax - color_func(value)) / (vmax - vmin))
             hue = float(abs(hue))
-            # no color for nan values
-            if math.isnan(hue):
-                return
             if hue > 1:
                 hue = 1
             color = QColor.fromHsvF(hue, BACKGROUND_NUMBER_SATURATION,
