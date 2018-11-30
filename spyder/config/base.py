@@ -20,6 +20,7 @@ import os.path as osp
 import os
 import shutil
 import sys
+import warnings
 import getpass
 import tempfile
 
@@ -57,16 +58,19 @@ def running_under_pytest():
 # This is needed after restarting and using debug_print
 STDOUT = sys.stdout if PY3 else codecs.getwriter('utf-8')(sys.stdout)
 STDERR = sys.stderr
-def _get_debug_env():
+
+
+def get_debug_level():
     debug_env = os.environ.get('SPYDER_DEBUG', '')
     if not debug_env.isdigit():
         debug_env = bool(debug_env)
-    return int(debug_env)    
-DEBUG = _get_debug_env()
+    return int(debug_env)
+
 
 def debug_print(*message):
     """Output debug messages to stdout"""
-    if DEBUG:
+    warnings.warn("debug_print is deprecated; use the logging module instead.")
+    if get_debug_level():
         ss = STDOUT
         if PY3:
             # This is needed after restarting and using debug_print
@@ -266,6 +270,7 @@ DEFAULT_LANGUAGE = 'en'
 LANGUAGE_CODES = {'en': u'English',
                   'fr': u'Français',
                   'es': u'Español',
+                  'hu': u'Magyar',
                   'pt_BR': u'Português',
                   'ru': u'Русский',
                   'zh_CN': u'简体中文',
@@ -296,9 +301,10 @@ def get_available_translations():
     # is added, to ensure LANGUAGE_CODES is updated.
     for lang in langs:
         if lang not in LANGUAGE_CODES:
-            error = _('Update LANGUAGE_CODES (inside config/base.py) if a new '
-                      'translation has been added to Spyder')
-            raise Exception(error)
+            error = ('Update LANGUAGE_CODES (inside config/base.py) if a new '
+                     'translation has been added to Spyder')
+            print(error)  # spyder: test-skip
+            return ['en']
     return langs
 
 
@@ -309,11 +315,11 @@ def get_interface_language():
     otherwise it will return DEFAULT_LANGUAGE.
 
     Example:
-    1.) Spyder provides ('en',  'fr', 'es' and 'pt_BR'), if the locale is
-    either 'en_US' or 'en' or 'en_UK', this function will return 'en'
+    1.) Spyder provides ('en',  'de', 'fr', 'es' 'hu' and 'pt_BR'), if the
+    locale is either 'en_US' or 'en' or 'en_UK', this function will return 'en'
 
-    2.) Spyder provides ('en',  'fr', 'es' and 'pt_BR'), if the locale is
-    either 'pt' or 'pt_BR', this function will return 'pt_BR'
+    2.) Spyder provides ('en',  'de', 'fr', 'es' 'hu' and 'pt_BR'), if the
+    locale is either 'pt' or 'pt_BR', this function will return 'pt_BR'
     """
 
     # Solves issue #3627
@@ -420,48 +426,17 @@ _ = get_translation("spyder")
 #==============================================================================
 # Namespace Browser (Variable Explorer) configuration management
 #==============================================================================
-def get_supported_types():
-    """
-    Return a dictionnary containing types lists supported by the 
-    namespace browser:
-    dict(picklable=picklable_types, editable=editables_types)
-         
-    See:
-    get_remote_data function in spyder/widgets/variableexplorer/utils/monitor.py
-    
-    Note:
-    If you update this list, don't forget to update doc/variablexplorer.rst
-    """
-    from datetime import date, timedelta
-    editable_types = [int, float, complex, list, set, dict, tuple, date,
-                      timedelta] + list(TEXT_TYPES) + list(INT_TYPES)
-    try:
-        from numpy import ndarray, matrix, generic
-        editable_types += [ndarray, matrix, generic]
-    except:
-        pass
-    try:
-        from pandas import DataFrame, Series, Index
-        editable_types += [DataFrame, Series, Index]
-    except:
-        pass
-    picklable_types = editable_types[:]
-    try:
-        from spyder.pil_patch import Image
-        editable_types.append(Image.Image)
-    except:
-        pass
-    return dict(picklable=picklable_types, editable=editable_types)
-
 # Variable explorer display / check all elements data types for sequences:
 # (when saving the variable explorer contents, check_all is True,
-#  see widgets/variableexplorer/namespacebrowser.py:NamespaceBrowser.save_data)
 CHECK_ALL = False #XXX: If True, this should take too much to compute...
 
 EXCLUDED_NAMES = ['nan', 'inf', 'infty', 'little_endian', 'colorbar_doc',
                   'typecodes', '__builtins__', '__main__', '__doc__', 'NaN',
                   'Inf', 'Infinity', 'sctypes', 'rcParams', 'rcParamsDefault',
                   'sctypeNA', 'typeNA', 'False_', 'True_',]
+
+# To be able to get and set variables between Python 2 and 3
+PICKLE_PROTOCOL = 2
 
 
 #==============================================================================

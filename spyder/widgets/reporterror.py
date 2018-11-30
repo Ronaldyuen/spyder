@@ -19,14 +19,15 @@ from qtpy.QtWidgets import (QApplication, QCheckBox, QDialog, QFormLayout,
 
 # Local imports
 from spyder import __project_url__, __trouble_url__
-from spyder.config.base import _, DEV
+from spyder.config.base import _
 from spyder.config.gui import get_font
+from spyder.config.gui import CONF
 from spyder.utils import icon_manager as ima
 from spyder.utils.qthelpers import restore_keyevent
 from spyder.widgets.github.backend import GithubBackend
+from spyder.plugins.editor.widgets.codeeditor import CodeEditor
 from spyder.widgets.mixins import BaseEditMixin, TracebackLinksMixin
-from spyder.widgets.sourcecode.codeeditor import CodeEditor
-from spyder.widgets.sourcecode.base import ConsoleBaseWidget
+from spyder.plugins.editor.widgets.base import ConsoleBaseWidget
 
 
 # Minimum number of characters to introduce in the title and
@@ -45,7 +46,8 @@ class DescriptionWidget(CodeEditor):
         # Editor options
         self.setup_editor(
             language='md',
-            color_scheme='Scintilla',
+            color_scheme=CONF.get('appearance',
+                                  'selected'),
             linenumbers=False,
             scrollflagarea=False,
             wrap=True,
@@ -272,11 +274,11 @@ class SpyderErrorDialog(QDialog):
             issue_text = description
 
         try:
-            if DEV or main is None:
+            if main is None:
                 org = 'ccordoba12'
             else:
                 org = 'spyder-ide'
-            github_backend = GithubBackend(org, 'spyder')
+            github_backend = GithubBackend(org, 'spyder', parent_widget=main)
             github_report = github_backend.send_report(title, issue_text)
             if github_report:
                 self.close()
@@ -311,7 +313,7 @@ class SpyderErrorDialog(QDialog):
             self.details.hide()
             self.details_btn.setText(_('Show details'))
         else:
-            self.resize(570, 650)
+            self.resize(570, 700)
             self.details.document().setPlainText('')
             self.details.append_text_to_shell(self.error_traceback,
                                               error=True,

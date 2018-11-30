@@ -54,7 +54,7 @@ If you use Anaconda you can create a conda environment with
 the following commands:
 
 ```bash
-  $ conda create -n spyder-dev python=3
+  $ conda create -n spyder-dev python=3.6
   $ source activate spyder-dev
 ```
 
@@ -75,8 +75,7 @@ After you have created your development environment, you need to install
 Spyder's necessary dependencies. The easiest way to do so (with Anaconda) is
 
 ```bash
-  $ conda install spyder
-  $ conda remove spyder
+  $ conda install -c spyder-ide --file requirements/conda.txt
 ```
 
 This installs all of Spyder's dependencies into the environment along with
@@ -86,15 +85,39 @@ If using `pip` and `virtualenv` (not recommended), you need to `cd` to
 the directory where your git clone is stored and run:
 
 ```bash
-  $ pip install -r requirements/requirements.txt
+  $ pip install -r requirements/pip.txt
 ```
 
-If you are using `pip` and Python 3, you also need to install a Qt binding
-package (PyQt5). This can be achieved by running:
+### Using the correct version of spyder-kernels
+
+Following the separation in v3.3 of Spyder's console code into its own package,
+`spyder-kernels`, you'll need to have the corresponding version of it
+available—`0.x` for Spyder 3 (`3.x` branch), and `1.x` for Spyder 4
+(`master` branch). The above procedure will install the `0.x` version;
+to test the `master` branch (Spyder 4), you'll need to install the
+corresponding `1.x` version of `spyder-kernels`.
+
+This can be done via two methods: installing the correct version via `conda`:
 
 ```bash
-  $ pip install pyqt5
+conda install -c spyder-ide spyder-kernels=1.*
 ```
+
+or `pip`:
+
+```bash
+pip install spyder-kernels==1.*
+```
+
+(and using `conda install spyder-kernels=0.*` to switch back to the
+Spyder 3 version), or by `clone`-ing the
+[spyder-kernels git repository](https://github.com/spyder-ide/spyder-kernels)
+to somewhere on your path checking out the appropriate branch
+(`0.x` or `master`) corresponding to the version of Spyder (3 or 4)
+you would like to run, and running the commend `pip install -e` at the root.
+For any non-trivial development work, keeping two separate virtual environments
+(with `conda-env` or `venv`) for Spyder 3 and 4 makes this process
+much quicker and less tedious.
 
 ### Running Spyder
 
@@ -117,6 +140,26 @@ you need to restart Spyder or start a fresh instance (you can run multiple
 copies simultaneously by unchecking the Preferences option
 <kbd>Use a single instance</kbd> under
 <kbd>General</kbd> > <kbd>Advanced Settings</kbd> .
+
+
+##  Running Tests
+
+To install our test dependencies under Anaconda:
+
+```bash
+  $ conda install -c spyder-ide --file requirements/tests.txt
+```
+
+If using `pip` (for experts only), run the following from the directory
+where your git clone is stored:
+```bash
+  $ pip install -r requirements/tests.txt
+```
+
+To run the Spyder test suite, please use (from the `spyder` root directory):
+```bash
+  $ python runtests.py
+```
 
 
 ## Spyder Branches
@@ -161,24 +204,80 @@ For example, backporting `my_branch` from `master` to `3.x`:
 ```
 
 
-##  Running Tests
+## Adding Third-Party Content
 
-To install our test dependencies under Anaconda:
+All files or groups of files, including source code, images, icons, and other
+assets, that originate from projects outside of the Spyder organization
+(regardless of the license), must be first approved by the Spyder team.
+Always check with us (on Github, Gitter, Google Group, etc) before attempting
+to add content from an external project, and only do so when necessary.
 
-```bash
-  $ conda install --file requirements/test_requirements.txt -c spyder-ide
-```
 
-If using `pip` (for experts only), run the following from the directory
-where your git clone is stored:
-```bash
-  $ pip install -r requirements/test_requirements.txt
-```
+### Licenses
 
-To run the Spyder test suite, please use (from the `spyder` root directory):
-```bash
-  $ python runtests.py
-```
+Code considered for inclusion must be under a permissive (i.e. non-copyleft)
+license, particularly as the following (in order of preference):
+* MIT (Expat)
+* Public domain (preferably, CC0)
+* ISC license
+* BSD 2-clause ("Simplified BSD")
+* BSD 3-clause ("New" or "Modified BSD")
+* Apache License 2.0
+
+Additionally, external assets (fonts, icons, images, sounds, animations)
+can generally be under one of the following weak-copyleft and content licenses:
+* Creative Commons Attribution 3.0 or 4.0
+* SIL Open Font License 1.1
+* GNU LGPL 2.1 or 3.0
+
+Additional licenses *may* qualify for these lists from time to time, but every
+effort should be made to avoid it. Regardless, all such licenses must be
+OSI, FSF, and DSFG approved as well as GPLv3-compatible to ensure maximum
+free distribution and use of Spyder with minimum ambiguity or fragmentation.
+
+
+### Steps to take
+
+#. Contact the Spyder team to ensure the usage is justified and compatible.
+
+#. Add the files, preserving any original copyright/legal/attribution header
+
+#. If making non-trivial modifications, copy the standard Spyder copyright
+   header from ``.ciocopyright`` to just below the original headers;
+   if the original headers are unformatted and just consist of a copyright
+   statement and perhaps mention of the license, incorporate them verbatim
+   within the Spyder header where appropriate.
+   Always ensure copyright statements are in ascending chronological order,
+   and replace the year in the Spyder copyright statement with the current one.
+   Modify the license location to be the current directory, or NOTICE.txt.
+
+#. Include the following line at the end of each module's docstring,
+   separated by blank lines:
+
+   ```rst
+   Adapted from path/to/file/in/original/repo.py of the
+   `Project Name <url-to-original-github-repo>`_.
+   ```
+
+   For example,
+
+   ```rst
+   Adapted from qcrash/_dialogs/gh_login.py of the
+   `QCrash Project <https://github.com/ColinDuquesnoy/QCrash>`_.
+   ```
+
+#. Convert the files to project standards where needed.
+
+#. If the copied file(s) reside in a directory dedicated to them, place the
+   source project's LICENSE.txt file there, and any other legal files.
+   Also, mention the same in the __init__.py file in that directory.
+
+#. Add an entry in NOTICE.txt with the instructions and template there.
+
+#. If a non-code visible asset (icons, fonts, animations, etc) or otherwise
+   under a Creative Commons license, include a mention in the appropriate
+   section of the README, as well as Spyder's About dialog, in the same form
+   as the others present there.
 
 
 ## More information
@@ -198,7 +297,7 @@ https://github.com/spyder-ide/spyder/wiki/Troubleshooting-Guide-and-FAQ)
 
 [Gitter Chatroom](https://gitter.im/spyder-ide/public)
 
-[Google Group](http://groups.google.com/group/spyderlib)
+[Google Group](https://groups.google.com/group/spyderlib)
 
 [@Spyder_IDE on Twitter](https://twitter.com/spyder_ide)
 

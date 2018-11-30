@@ -1,17 +1,25 @@
+# -*- coding: utf-8 -*-
+# -----------------------------------------------------------------------------
 # Copyright (c) 2005 Divmod, Inc.
-# Copyright (c) Twisted Matrix Laboratories.
-# Copyright (c) Spyder Project Contributors
-# Twisted is distributed under the MIT license.
+# Copyright (c) 2008-2011 Twisted Matrix Laboratories
+# Copyright (c) 2012- Spyder Project Contributors
+#
+# Distributed under the terms of the MIT (Expat) License
+# (see LICENSE.txt in this directory and NOTICE.txt in the root for details)
+# -----------------------------------------------------------------------------
 
 """
 Filesystem-based interprocess mutex.
 
 Taken from the Twisted project.
-Distributed under the MIT license.
+Distributed under the MIT (Expat) license.
 
 Changes by the Spyder Team to the original module:
   * Rewrite kill Windows function to make it more reliable.
   * Detect if the process that owns the lock is an Spyder one.
+
+Adapted from src/twisted/python/lockfile.py of the
+`Twisted project <https://github.com/twisted/twisted>`_.
 """
 
 __metaclass__ = type
@@ -42,7 +50,7 @@ else:
     import ctypes
     from ctypes import wintypes
 
-    # http://msdn.microsoft.com/en-us/library/windows/desktop/ms684880(v=vs.85).aspx
+    # https://docs.microsoft.com/en-us/windows/desktop/ProcThread/process-security-and-access-rights
     PROCESS_QUERY_INFORMATION = 0x400
 
     # GetExitCodeProcess uses a special exit code to indicate that the
@@ -50,7 +58,7 @@ else:
     STILL_ACTIVE = 259
     
     def _is_pid_running(pid):
-        """Taken from http://www.madebuild.org/blog/?p=30"""
+        """Taken from https://www.madebuild.org/blog/?p=30"""
         kernel32 = ctypes.windll.kernel32
         handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid)
         if handle == 0:

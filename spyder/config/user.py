@@ -108,16 +108,16 @@ class DefaultsConfig(cp.ConfigParser):
 
         try:  # the "easy" way
             _write_file(fname)
-        except IOError:
+        except EnvironmentError:
             try:  # the "delete and sleep" way
                 if osp.isfile(fname):
                     os.remove(fname)
                 time.sleep(0.05)
                 _write_file(fname)
             except Exception as e:
-                print("Failed to write user configuration file.")  # spyder: test-skip
-                print("Please submit a bug report.")  # spyder: test-skip
-                raise(e)
+                print("Failed to write user configuration file to disk, with "
+                      "the exception shown below")  # spyder: test-skip
+                print(e)  # spyder: test-skip
 
     def filename(self):
         """Defines the name of the configuration file to use."""
@@ -216,6 +216,13 @@ class UserConfig(DefaultsConfig):
                     self.reset_to_defaults(save=False)
                 else:
                     self._update_defaults(defaults, old_ver)
+                if check_version(old_ver, '44.1.0', '<'):
+                    run_lines = to_text_string(self.get('ipython_console',
+                                                        'startup/run_lines'))
+                    if run_lines is not NoDefault:
+                        run_lines = run_lines.replace(',', '; ')
+                        self.set('ipython_console',
+                                 'startup/run_lines', run_lines)
                 # Remove deprecated options if major version has changed
                 if remove_obsolete or _major(version) != _major(old_ver):
                     self._remove_deprecated_options(old_ver)

@@ -15,11 +15,10 @@ import tempfile
 import traceback
 
 # Local import
-from spyder.config.base import _, DEBUG
+from spyder.config.base import _, get_debug_level
 from spyder.utils import programs, encoding
 from spyder.py3compat import to_text_string, to_binary_string, PY3
-from spyder import dependencies
-DEBUG_EDITOR = DEBUG >= 3
+DEBUG_EDITOR = get_debug_level() >= 3
 
 #==============================================================================
 # Pyflakes/pep8 code analysis
@@ -64,9 +63,9 @@ def check_with_pyflakes(source_code, filename=None):
                 results = [(value.args[0], value.lineno)]
         except (ValueError, TypeError):
             # Example of ValueError: file contains invalid \x escape character
-            # (see http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=674797)
+            # (see https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=674797)
             # Example of TypeError: file contains null character
-            # (see http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=674796)
+            # (see https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=674796)
             results = []
         else:
             # Okay, it's syntactically valid.  Now check it.
@@ -88,20 +87,10 @@ def check_with_pyflakes(source_code, filename=None):
             traceback.print_exc()  # Print exception in internal console
     return results
 
-# Required version:
-# Why 0.5 (Python2)? Because it's based on _ast (thread-safe)
-PYFLAKES_REQVER = '>=0.6.0' if PY3 else '>=0.5.0'
-dependencies.add("pyflakes", _("Real-time code analysis on the Editor"),
-                 required_version=PYFLAKES_REQVER)
-
-PYCODESTYLE_REQVER = '>=2.3'
-dependencies.add("pycodestyle", _("Real-time code style analysis on the Editor"),
-                 required_version=PYCODESTYLE_REQVER)
-
 
 def is_pyflakes_installed():
     """Return True if pyflakes required version is installed"""
-    return programs.is_module_installed('pyflakes', PYFLAKES_REQVER)
+    return programs.is_module_installed('pyflakes')
 
 
 def get_checker_executable(name):

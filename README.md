@@ -1,10 +1,14 @@
 ![Spyder — The Scientific Python Development Environment](
 ./img_src/spyder_readme_banner.png)
 
-*Copyright © 2009–2018 Spyder Project Contributors*
+*Copyright © 2009–2018 [Spyder Project Contributors](
+https://github.com/spyder-ide/spyder/graphs/contributors)*
+
+*Some source files and icons may be under other authorship/licenses; see
+[NOTICE.txt](https://github.com/spyder-ide/spyder/blob/master/NOTICE.txt).*
 
 
-[![license](https://img.shields.io/pypi/l/spyder.svg)](./LICENSE)
+[![license](https://img.shields.io/pypi/l/spyder.svg)](./LICENSE.txt)
 [![pypi version](https://img.shields.io/pypi/v/spyder.svg)](https://pypi.org/project/spyder/)
 [![conda version](https://img.shields.io/conda/vn/conda-forge/spyder.svg)](https://www.anaconda.com/download/)
 [![download count](https://img.shields.io/conda/dn/conda-forge/spyder.svg)](https://www.anaconda.com/download/)
@@ -123,7 +127,7 @@ able to provide limited assistance if you do run into trouble.
 Other install options exist, including:
 
 * The [WinPython](https://winpython.github.io/) distribution for Windows
-* The [MacPorts](http://www.macports.org/) project for macOS
+* The [MacPorts](https://www.macports.org/) project for macOS
 * Your distribution's package manager (i.e. `apt-get`, `yum`, etc) on Linux
 * The `pip` package manager, included with most Python installations
 
@@ -142,12 +146,32 @@ are either duplicates, or can be fixed on the user side with a few easy steps.
 Thanks!
 
 
-## Contributing
+## Contributing and Credits
 
-Everyone is welcome to help with Spyder. Please read our
-[contributing instructions](
+Spyder was originally created by [Pierre Raybaut](
+https://github.com/PierreRaybaut), and is currently maintained by
+[Carlos Córdoba](https://github.com/ccordoba12) and an international
+community of volunteers.
+
+You can join us—everyone is welcome to help with Spyder!
+Please read our [contributing instructions](
 https://github.com/spyder-ide/spyder/blob/master/CONTRIBUTING.md)
 to get started!
+
+Certain source files are distributed under other compatible permissive licenses
+and/or originally by other authors.
+The icons for the Spyder 3 theme are derived from [Font Awesome](
+https://fontawesome.com/) 4.7 (© 2016 David Gandy; SIL OFL 1.1).
+Most Spyder 2 theme icons are sourced from the [Crystal Project icon set](
+https://www.everaldo.com) (© 2006-2007 Everaldo Coelho; LGPL 2.1+).
+Other Spyder 2 icons are from [Yusuke Kamiyamane](
+http://p.yusukekamiyamane.com/) (© 2013 Yusuke Kamiyamane; CC-BY 3.0),
+the [FamFamFam Silk icon set](http://www.famfamfam.com/lab/icons/silk/)
+(© 2006 Mark James; CC-BY 2.5), and the [KDE Oxygen icons](
+https://www.kde.org/) (© 2007 KDE Artists; LGPL 3.0+).
+
+See [NOTICE.txt](https://github.com/spyder-ide/spyder/blob/master/NOTICE.txt)
+for full legal information.
 
 
 ## Running from a Github clone
@@ -161,7 +185,7 @@ they are officially released.
 If using `conda` (strongly recommended), this can be done by running the
 following from the command line (the Anaconda Prompt, if on Windows):
 
-```
+```bash
 conda install spyder
 conda remove spyder
 git clone https://github.com/spyder-ide/spyder.git
@@ -169,19 +193,29 @@ cd spyder
 python bootstrap.py
 ```
 
-Alternatively, you can use `pip` to install PyQt5 separately and
-the other *runtime dependencies* listed below. However, beware:
+You also need to make sure the correct `spyder-kernels` version is installed
+for the version of Spyder you are testing. The above procedure will give you
+`spyder-kernels` 0.x for the `3.x` branch (Spyder 3),
+so to run the `master` branch (Spyder 4) you need to additionally execute:
+
+```bash
+conda install -c spyder-ide spyder-kernels=1.*
+```
+
+Alternatively, you can use `pip` to install PyQt5 and the other
+*runtime dependencies* listed below. However, beware:
 this method is recommended for experts only, and you'll need to solve any
-problems on your own. See the
-[installation instructions](https://docs.spyder-ide.org/installation.html)
-for more details.
+problems on your own.
+
+See the [installation instructions](
+https://docs.spyder-ide.org/installation.html) for more details on all of this.
 
 
 ## Dependencies
 
 **Important Note**: Most or all of the dependencies listed below come
 with *Anaconda* and other scientific Python distributions, so you don't need
-to install them seperatly in those cases.
+to install them separately in those cases.
 
 ### Build dependencies
 
@@ -193,27 +227,29 @@ a Python version greater than 2.7 or 3.4 (Python <=3.3 is no longer supported).
 * **Python** 2.7 or 3.4+: The core language Spyder is written in and for.
 * **PyQt5** 5.5+: Python bindings for Qt, used for Spyder's GUI.
 * **qtconsole** 4.2.0+: Enhanced Python interpreter.
-* **Rope** 0.9.4+ and **Jedi** 0.11.0+: Editor code completion, calltips
-  and go-to-definition.
-* **Pyflakes**: Real-time code analysis.
+* **Python-language-server**: Editor code completion, calltips
+  go-to-definition and real-time code analysis
 * **Sphinx**: Rich text mode for the Help pane.
 * **Pygments** 2.0+: Syntax highlighting for all file types it supports.
 * **Pylint**: Static code analysis.
-* **Pycodestyle**: Real-time code style analysis.
 * **Psutil**: CPU and memory usage on the status bar.
 * **Nbconvert**: Manipulation of notebooks in the Editor.
-* **Qtawesome** 0.4.1+: To have an icon theme based on FontAwesome.
+* **Qtawesome** 0.5.0+: To have an icon theme based on FontAwesome.
 * **Pickleshare**: Show import completions on the Python consoles.
-* **PyZMQ**: Run introspection services asynchronously.
-* **QtPy** 1.2.0+: Abstraction layer for Python Qt bindings so that Spyder
+* **PyZMQ**: Client for the language server protocol (LSP).
+* **QtPy** 1.5.0+: Abstraction layer for Python Qt bindings so that Spyder
   can run on multiple Qt bindings and versions.
 * **Chardet**: Character encoding auto-detection in Python.
 * **Numpydoc**: Used by Jedi to get function return types from Numpydocstrings.
 * **Cloudpickle**: Serialize variables in the IPython kernel to send to Spyder.
+* **spyder-kernels** 1.0+: Jupyter kernels for the Spyder console.
+* **keyring**: Save Github credentials to report errors securely.
+* **QDarkStyle** 2.6.3+: A dark stylesheet for Qt applications, used for Spyder's dark theme.
+* **pexpect**/**paramiko**: Connect to remote kernels through SSH.
 
 ### Optional dependencies
 
-* **Matplotlib**: 2D/3D plotting in the Python and IPython consoles.
+* **Matplotlib**: 2D/3D plotting in the IPython console.
 * **Pandas**: View and edit DataFrames and Series in the Variable Explorer.
 * **Numpy**: View and edit 2- or 3-dimensional arrays in the Variable Explorer.
 * **SymPy**: Symbolic mathematics in the IPython console.

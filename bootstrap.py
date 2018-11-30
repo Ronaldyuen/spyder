@@ -1,14 +1,18 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# -----------------------------------------------------------------------------
+# Copyright (c) 2009- Spyder Project Contributors
 #
-# Licensed under the terms of the MIT License
+# Distributed under the terms of the MIT License
 # (see spyder/__init__.py for details)
+# -----------------------------------------------------------------------------
+
 
 """
-Bootstrapping Spyder
+Bootstrap Spyder.
 
-Detect environment and execute Spyder from source checkout
-See Issue 741
+Detect environment and execute Spyder from source checkout.
+See Issue #741.
 """
 
 # pylint: disable=C0103
@@ -110,7 +114,7 @@ if args.debug:
     if "spyder.config.base" in sys.modules:
         sys.exit("ERROR: Can't enable debug mode - Spyder is already imported")
     print("0x. Switching debug mode on")
-    os.environ["SPYDER_DEBUG"] = "True"
+    os.environ["SPYDER_DEBUG"] = "3"
     # this way of interaction suxx, because there is no feedback
     # if operation is successful
 

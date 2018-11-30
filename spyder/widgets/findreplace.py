@@ -25,7 +25,8 @@ from spyder.config.base import _
 from spyder.config.gui import config_shortcut
 from spyder.py3compat import to_text_string
 from spyder.utils import icon_manager as ima
-from spyder.utils.editor import TextHelper
+from spyder.utils.misc import regexp_error_msg
+from spyder.plugins.editor.utils.editor import TextHelper
 from spyder.utils.qthelpers import create_toolbutton, get_icon
 from spyder.widgets.comboboxes import PatternComboBox
 
@@ -96,13 +97,14 @@ class FindReplace(QWidget):
         self.next_button.clicked.connect(self.update_search_combo)
         self.previous_button.clicked.connect(self.update_search_combo)
 
-        self.re_button = create_toolbutton(self, icon=ima.icon('advanced'),
+        self.re_button = create_toolbutton(self, icon=ima.icon('regex'),
                                            tip=_("Regular expression"))
         self.re_button.setCheckable(True)
         self.re_button.toggled.connect(lambda state: self.find())
         
         self.case_button = create_toolbutton(self,
-                                             icon=get_icon("upper_lower.png"),
+                                             icon=ima.icon(
+                                                 "format_letter_case"),
                                              tip=_("Case Sensitive"))
         self.case_button.setCheckable(True)
         self.case_button.toggled.connect(lambda state: self.find())
@@ -338,7 +340,7 @@ class FindReplace(QWidget):
             QWebEngineView = type(None)
         self.words_button.setVisible(not isinstance(editor, QWebEngineView))
         self.re_button.setVisible(not isinstance(editor, QWebEngineView))
-        from spyder.widgets.sourcecode.codeeditor import CodeEditor
+        from spyder.plugins.editor.widgets.codeeditor import CodeEditor
         self.is_code_editor = isinstance(editor, CodeEditor)
         self.highlight_button.setVisible(self.is_code_editor)
         if refresh:
@@ -388,16 +390,6 @@ class FindReplace(QWidget):
         # When several lines are selected in the editor and replace box is activated, 
         # dynamic search is deactivated to prevent changing the selection. Otherwise
         # we show matching items.
-        def regexp_error_msg(pattern):
-            """Returns None if the pattern is a valid regular expression or
-            a string describing why the pattern is invalid.
-            """
-            try:
-                re.compile(pattern)
-            except re.error as e:
-                return str(e)
-            return None
-
         if multiline_replace_check and self.replace_widgets[0].isVisible() and \
            len(to_text_string(self.editor.get_selected_text()).splitlines())>1:
             return None
@@ -457,11 +449,18 @@ class FindReplace(QWidget):
             replace_text = to_text_string(self.replace_text.currentText())
             search_text = to_text_string(self.search_text.currentText())
             re_pattern = None
+
+            # Check regexp before proceeding
             if self.re_button.isChecked():
                 try:
                     re_pattern = re.compile(search_text)
+                    # Check if replace_text can be substituted in re_pattern
+                    # Fixes issue #7177
+                    re_pattern.sub(replace_text, '')
                 except re.error:
-                    return  # do nothing with an invalid regexp
+                    # Do nothing with an invalid regexp
+                    return
+
             case = self.case_button.isChecked()
             first = True
             cursor = None
@@ -557,10 +556,16 @@ class FindReplace(QWidget):
                 replace_text = re.escape(replace_text)
             if words:  # match whole words only
                 pattern = r'\b{pattern}\b'.format(pattern=pattern)
+
+            # Check regexp before proceeding
             try:
                 re_pattern = re.compile(pattern, flags=re_flags)
+                # Check if replace_text can be substituted in re_pattern
+                # Fixes issue #7177
+                re_pattern.sub(replace_text, '')
             except re.error as e:
-                return  # do nothing with an invalid regexp
+                # Do nothing with an invalid regexp
+                return
 
             selected_text = to_text_string(self.editor.get_selected_text())
             replacement = re_pattern.sub(replace_text, selected_text)

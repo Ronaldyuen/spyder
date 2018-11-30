@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
+# -----------------------------------------------------------------------------
+# Copyright (c) 2009- Spyder Project Contributors
+#
+# Distributed under the terms of the MIT License
+# (see spyder/__init__.py for details)
+# -----------------------------------------------------------------------------
 
-# Std imports
+
+# Standard library imports
 import ctypes
 import os
 import os.path as osp
@@ -40,7 +47,7 @@ def send_args_to_spyder(args):
     port = CONF.get('main', 'open_files_port')
 
     # Wait ~50 secs for the server to be up
-    # Taken from http://stackoverflow.com/a/4766598/438386
+    # Taken from https://stackoverflow.com/a/4766598/438386
     for _x in range(200):
         try:
             for arg in args:
@@ -75,6 +82,7 @@ def main():
         options = Mock()
         options.new_instance = False
         options.reset_config_files = False
+        options.debug_info = None
         args = None
     else:
         options, args = get_options()
@@ -129,6 +137,10 @@ def main():
                 os.environ['LC_ALL'] = 'C'
             except Exception:
                 pass
+
+    if options.debug_info:
+        levels = {'minimal': '2', 'verbose': '3'}
+        os.environ['SPYDER_DEBUG'] = levels[options.debug_info]
 
     if CONF.get('main', 'single_instance') and not options.new_instance \
       and not options.reset_config_files and not running_in_mac_app():
