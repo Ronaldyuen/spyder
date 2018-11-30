@@ -68,7 +68,7 @@ def stack_log(msg):
         fun_name = match.group(2)
         if is_start_recording:
             log_text += fun_name + " " + num_line + " "
-        if fun_name == "test_edit":
+        if fun_name == "_test_edit":
             is_start_recording = True
     logger.info("[{}]".format(log_text) + msg)
 
@@ -1939,7 +1939,7 @@ class DataFrameEditor(QDialog):
 # ==============================================================================
 
 
-def test_edit(data, title="", parent=None):
+def _test_edit(data, title="", parent=None):
     """Test subroutine"""
     app = qapplication()  # analysis:ignore
     # cross platform pyqt5 style
@@ -1958,7 +1958,7 @@ def test_edit(data, title="", parent=None):
 import cProfile
 
 
-def test_wrapper(func, df, is_profiling=False):
+def _test_wrapper(func, df, is_profiling=False):
     if is_profiling:
         pr = cProfile.Profile()
         pr.enable()
@@ -2001,7 +2001,7 @@ def test():
     df1['super_super_super_unacceptable_long_column_name_that_should_not_happen'] = df1['Test']
     df1.set_index('date_time', inplace=True)
 
-    test_wrapper(test_edit, df1, is_profiling=False)
+    _test_wrapper(_test_edit, df1, is_profiling=False)
     # from pandas import MultiIndex
     # import numpy
     #
@@ -2013,7 +2013,7 @@ def test():
     # index = MultiIndex.from_tuples(tuples, names=['first', 'second'])
     # df = DataFrame(numpy.random.randn(6, 6), index=index[:6],
     #               columns=index[:6])
-    # test_wrapper(test_edit, df, is_profiling=False)
+    # _test_wrapper(_test_edit, df, is_profiling=False)
 
 
 if __name__ == '__main__':
