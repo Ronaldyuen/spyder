@@ -54,6 +54,7 @@ logger.addHandler(ch)
 import inspect
 import traceback
 import re
+import collections
 
 
 # Logging with the stack trace
@@ -732,21 +733,23 @@ class DataFrameModel(QAbstractTableModel):
     def find_next_value_same_col(self, cur_row, cur_col, is_direction_up):
         cur_val = self.get_value(cur_row, cur_col)
         selected_col = self.df.iloc[:, cur_col]
-        np_array = np.array([])
-        if len(selected_col) > 0:
+        if not isinstance(cur_val, str) and isinstance(cur_val, collections.Iterable):
+            # do not compare if its a list/dict/np.array
+            index_candidates = np.array([])
+        else:
             # check nan
-            if cur_val != cur_val:
-                np_array = np.where(~pd.isnull(selected_col))[0]
+            if pd.isna(cur_val):
+                index_candidates = np.where(~pd.isnull(selected_col))[0]
             else:
-                np_array = np.where(selected_col != cur_val)[0]
+                index_candidates = np.where(selected_col != cur_val)[0]
         if is_direction_up:
             try:
-                return np_array[np_array < cur_row][-1]
+                return index_candidates[index_candidates < cur_row][-1]
             except IndexError:
                 return 0
         else:
             try:
-                return np_array[np_array > cur_row][0]
+                return index_candidates[index_candidates > cur_row][0]
             except IndexError:
                 return self.df.shape[0] - 1
 
