@@ -613,8 +613,18 @@ class DataFrameModel(QAbstractTableModel):
                     return
             # self.return_max returns global max or column max
             vmax, vmin = self.return_max(self.max_min_col, column)
-            hue = (BACKGROUND_NUMBER_MINHUE + BACKGROUND_NUMBER_HUERANGE *
-                   (vmax - color_func(value)) / (vmax - vmin))
+            # handle infinity values
+            if value == np.inf:
+                hue_ratio = 0
+            elif value == -np.inf:
+                hue_ratio = 1
+            else:
+                if np.isinf(vmax) or np.isinf(vmin):
+                    # if max or min is inf, default color for other values
+                    return
+                else:
+                    hue_ratio = (vmax - color_func(value)) / (vmax - vmin)
+            hue = BACKGROUND_NUMBER_MINHUE + BACKGROUND_NUMBER_HUERANGE * hue_ratio
             hue = float(abs(hue))
             if hue > 1:
                 hue = 1
@@ -1969,7 +1979,6 @@ def _test_wrapper(func, df, is_profiling=False):
 
 def test():
     """DataFrame editor test"""
-    from numpy import nan
     import random
     import datetime
     string_list = ['AAAA', 'BBBBB', 'CCCCCCC', 'DDDDDDDD', 'EEEEEEE']
@@ -1977,7 +1986,8 @@ def test():
     variety_list = ['AAAA', 1, np.nan]
     datetime_list = [datetime.datetime(2018, 1, 1, 1, 1, 1), datetime.datetime(2022, 2, 2, 2, 2, 2)]
     true_false_list = [True, False]
-    nrow = 100000
+    float_inf_list = [0.11, 999.8, np.inf, -np.inf]
+    nrow = 10000
     r = random.Random(502)
     df1 = DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['Test'])
     df1['num'] = range(nrow)
@@ -1991,6 +2001,7 @@ def test():
     df1 = df1.join([DataFrame([r.choice(true_false_list) for _ in range(nrow)], columns=['true_false_list'])])
     df1 = df1.join([DataFrame([r.choice(string_list_2) for _ in range(nrow)], columns=['string_list_2'])])
     df1 = df1.join([DataFrame([r.choice(datetime_list) for _ in range(nrow)], columns=['date_time'])])
+    df1 = df1.join([DataFrame([r.choice(float_inf_list) for _ in range(nrow)], columns=['float_inf_list'])])
     df1 = df1.join([DataFrame(np.random.rand(nrow, 10), columns=list(map(chr, range(97, 107))))])
     df1.loc[1, 'a'] = float('nan')
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
