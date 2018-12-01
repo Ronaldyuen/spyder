@@ -105,7 +105,7 @@ from spyder.utils.qthelpers import (add_actions, create_action,
 from spyder.plugins.variableexplorer.widgets.arrayeditor import get_idx_rect
 
 # Supported Numbers and complex numbers
-REAL_NUMBER_TYPES = (float, int, np.int64, np.int32)
+REAL_NUMBER_TYPES = (float, int, np.int64, np.int32, np.int16, np.float32, np.float64)
 COMPLEX_NUMBER_TYPES = (complex, np.complex64, np.complex128)
 # Used to convert bool intrance to false since bool('False') will return True
 _bool_false = ['false', 'f', '0', '0.', '0.0', ' ']
