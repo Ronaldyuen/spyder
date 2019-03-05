@@ -27,7 +27,7 @@ from spyder.utils.qthelpers import restore_keyevent
 from spyder.widgets.github.backend import GithubBackend
 from spyder.plugins.editor.widgets.codeeditor import CodeEditor
 from spyder.widgets.mixins import BaseEditMixin, TracebackLinksMixin
-from spyder.plugins.editor.widgets.base import ConsoleBaseWidget
+from spyder.plugins.console.widgets.console import ConsoleBaseWidget
 
 
 # Minimum number of characters to introduce in the title and
@@ -160,6 +160,7 @@ class SpyderErrorDialog(QDialog):
         self.title_chars_label = QLabel(_("{} more characters "
                                           "to go...").format(TITLE_MIN_CHARS))
         form_layout = QFormLayout()
+        form_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         red_asterisk = '<font color="Red">*</font>'
         title_label = QLabel(_("<b>Title</b>: {}").format(red_asterisk))
         form_layout.setWidget(0, QFormLayout.LabelRole, title_label)

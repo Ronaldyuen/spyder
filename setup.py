@@ -210,22 +210,26 @@ install_requires = [
     'sphinx',
     'pylint',
     'psutil',
-    'qtawesome>=0.5.0',
+    'qtawesome>=0.5.2',
     'qtpy>=1.5.0',
     'pickleshare',
     'pyzmq',
     'chardet>=2.0.0',
     'numpydoc',
-    'spyder-kernels>=1.0',
+    'spyder-kernels>=1.2',
     'qdarkstyle>=2.6.4',
+    'atomicwrites',
     # Don't require keyring for Python 2 and Linux
     # because it depends on system packages
     'keyring;sys_platform!="linux2"',
     # Packages for pyqt5 are only available in
     # Python 3
-    'pyqt5<5.10;python_version>="3"',
+    'pyqt5<5.13;python_version>="3"',
+    # pyqt5 5.12 split WebEngine into the
+    # pyqtwebengine module
+    'pyqtwebengine<5.13',
     # Pyls with all its dependencies
-    'python-language-server[all]==0.19.0',
+    'python-language-server[all]>=0.19.0,<0.23',
     # Required to get SSH connections to remote kernels
     'pexpect;platform_system!="Windows"',
     'paramiko;platform_system=="Windows"'
@@ -233,7 +237,7 @@ install_requires = [
 
 extras_require = {
     'test:python_version == "2.7"': ['mock'],
-    'test': ['pytest',
+    'test': ['pytest<4.1',
              'pytest-qt',
              'pytest-mock',
              'pytest-cov',

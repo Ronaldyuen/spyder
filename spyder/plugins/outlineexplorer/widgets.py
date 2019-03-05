@@ -134,6 +134,7 @@ def item_at_line(root_item, line):
     the specified 'line' of the editor.
     """
     previous_item = root_item
+    item = root_item
     for item in get_item_children(root_item):
         if item.line > line:
             return previous_item
@@ -465,8 +466,6 @@ class OutlineExplorerTreeWidget(OneColumnTree):
             if previous_level is not None:
                 if level == previous_level:
                     pass
-                elif level > previous_level+4: # Invalid indentation
-                    continue
                 elif level > previous_level:
                     ancestors.append((previous_item, previous_level))
                 else:
