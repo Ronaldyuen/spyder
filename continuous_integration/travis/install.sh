@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -ex
 
 # -- Install Miniconda
 MINICONDA=Miniconda3-latest-Linux-x86_64.sh
@@ -32,9 +32,9 @@ else
     # Install Spyder and its dependencies from our setup.py
     pip install -e .[test]
 
-    # Downgrade PyQt5 to 5.11 for all Python 3's we test.
+    # Downgrade PyQt5 to 5.11 in Circle.
     # Else our tests gives segfaults
-    if [ "$PYTHON_VERSION" != "2.7" ]; then
+    if [ "$CIRCLECI" = "true" ]; then
         pip install pyqt5==5.11.*
     fi
 

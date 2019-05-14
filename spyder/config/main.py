@@ -21,7 +21,8 @@ from spyder.config.base import (CHECK_ALL, EXCLUDED_NAMES, get_home_dir,
 from spyder.config.fonts import MEDIUM, MONOSPACE, SANS_SERIF, SMALL
 from spyder.config.user import UserConfig
 from spyder.config.utils import IMPORT_EXT
-from spyder.utils import codeanalysis
+from spyder.plugins.editor.utils.findtasks import TASKS_PATTERN
+from spyder.utils.introspection.module_completion import PREFERRED_MODULES
 
 
 # =============================================================================
@@ -33,20 +34,16 @@ EXCLUDE_PATTERNS = ['*.csv, *.dat, *.log, *.tmp, *.bak, *.orig']
 # Extensions that should be visible in Spyder's file/project explorers
 SHOW_EXT = ['.py', '.ipynb', '.txt', '.dat', '.pdf', '.png', '.svg']
 
-
 # Extensions supported by Spyder (Editor or Variable explorer)
 USEFUL_EXT = IMPORT_EXT + SHOW_EXT
-
 
 # Name filters for file/project explorers (excluding files without extension)
 NAME_FILTERS = ['README', 'INSTALL', 'LICENSE', 'CHANGELOG'] + \
                ['*' + _ext for _ext in USEFUL_EXT if _ext]
 
-
 # Port used to detect if there is a running instance and to communicate with
 # it to open external files
 OPEN_FILES_PORT = 21128
-
 
 # OS Specific
 WIN = os.name == 'nt'
@@ -61,6 +58,9 @@ else:
     RUN_CELL_SHORTCUT = 'Ctrl+Return'
 RE_RUN_LAST_CELL_SHORTCUT = 'Alt+Return'
 RUN_CELL_AND_ADVANCE_SHORTCUT = 'Shift+Return'
+
+# Modules to be preloaded for Rope and Jedi
+PRELOAD_MDOULES = ', '.join(PREFERRED_MODULES)
 
 
 # =============================================================================
@@ -116,13 +116,9 @@ DEFAULTS = [
               'working_dir_history': 30,
               'working_dir_adjusttocontents': False,
               'wrap': True,
-              'calltips': True,
               'codecompletion/auto': False,
-              'codecompletion/enter_key': True,
-              'codecompletion/case_sensitive': True,
               'external_editor/path': 'SciTE',
               'external_editor/gotoline': '-goto:',
-              'light_background': True,
               }),
             ('main_interpreter',
              {
@@ -161,7 +157,11 @@ DEFAULTS = [
               'in_prompt': '',
               'out_prompt': '',
               'show_elapsed_time': False,
-              'ask_before_restart': True
+              'ask_before_restart': True,
+              # This is True because there are libraries like Pyomo
+              # that generate a lot of Command Prompts while running,
+              # and that's extremely annoying for Windows users.
+              'hide_cmd_windows': True
               }),
             ('variable_explorer',
              {
@@ -180,6 +180,7 @@ DEFAULTS = [
              {
               'mute_inline_plotting': True,
               'show_plot_outline': False,
+              'auto_fit_plotting': True
              }),
             ('editor',
              {
@@ -189,8 +190,6 @@ DEFAULTS = [
               'printer_header/font/bold': False,
               'wrap': False,
               'wrapflag': True,
-              'code_analysis/pyflakes': True,
-              'code_analysis/pep8': False,
               'todo_list': True,
               'realtime_analysis': True,
               'realtime_analysis/timeout': 2500,
@@ -202,17 +201,12 @@ DEFAULTS = [
               'indent_guides': False,
               'scroll_past_end': False,
               'toolbox_panel': True,
-              'calltips': True,
-              'go_to_definition': True,
               'close_parentheses': True,
               'close_quotes': True,
               'add_colons': True,
               'auto_unindent': True,
               'indent_chars': '*    *',
               'tab_stop_width_spaces': 4,
-              'codecompletion/auto': True,
-              'codecompletion/enter_key': True,
-              'codecompletion/case_sensitive': True,
               'check_eol_chars': True,
               'convert_eol_on_save': False,
               'convert_eol_on_save_to': 'LF',
@@ -232,6 +226,7 @@ DEFAULTS = [
               'onsave_analysis': False,
               'autosave_enabled': True,
               'autosave_interval': 60,
+              'docstring_type': 'Numpydoc',
               }),
             ('historylog',
              {
@@ -281,6 +276,7 @@ DEFAULTS = [
               'show_hidden': True,
               'show_all': True,
               'show_icontext': False,
+              'single_click_to_open': False,
               }),
             ('find_in_files',
              {
@@ -290,7 +286,7 @@ DEFAULTS = [
               'exclude_regexp': False,
               'search_text_regexp': False,
               'search_text': [''],
-              'search_text_samples': [codeanalysis.TASKS_PATTERN],
+              'search_text_samples': [TASKS_PATTERN],
               'more_options': True,
               'case_sensitive': False
               }),
@@ -354,6 +350,7 @@ DEFAULTS = [
               '_/switch to variable_explorer': "Ctrl+Shift+V",
               '_/switch to find_in_files': "Ctrl+Shift+F",
               '_/switch to explorer': "Ctrl+Shift+X",
+              '_/switch to plots': "Ctrl+Shift+G",
               # -- In widgets/findreplace.py
               '_/find text': "Ctrl+F",
               '_/find next': "F3",
@@ -438,6 +435,7 @@ DEFAULTS = [
               'editor/split vertically': "Ctrl+{",
               'editor/split horizontally': "Ctrl+_",
               'editor/close split panel': "Alt+Shift+W",
+              'editor/docstring': "Ctrl+Alt+D",
               # -- In Breakpoints
               '_/switch to breakpoints': "Ctrl+Shift+B",
               # ---- Consoles (in widgets/shell) ----
@@ -675,81 +673,35 @@ DEFAULTS = [
               'solarized/dark/number':     ('#cb4b16', False, False),
               'solarized/dark/instance':   ('#b58900', False, True)
              }),
-            ('lsp-server', {
-                'python': {
-                    'index': 0,
-                    'cmd': 'pyls',
-                    'args': '--host {host} --port {port} --tcp',
-                    'host': '127.0.0.1',
-                    'port': 2087,
-                    'external': False,
-                    'configurations': {
-                        'pyls': {
-                            'configurationSources': [
-                                "pycodestyle", "pyflakes"],
-                            'plugins': {
-                                'pycodestyle': {
-                                    'enabled': True,
-                                    'exclude': [],
-                                    'filename': [],
-                                    'select': [],
-                                    'ignore': [],
-                                    'hangClosing': False,
-                                    'maxLineLength': 79
-                                },
-                                'pyflakes': {
-                                    'enabled': True
-                                },
-                                'yapf': {
-                                    'enabled': False
-                                },
-                                'pydocstyle': {
-                                    'enabled': False,
-                                    'convention': 'pep257',
-                                    'addIgnore': [],
-                                    'addSelect': [],
-                                    'ignore': [],
-                                    'select': [],
-                                    'match': "(?!test_).*\\.py",
-                                    'matchDir': '[^\\.].*',
-                                },
-                                'rope': {
-                                    'extensionModules': None,
-                                    'ropeFolder': []
-                                },
-                                'rope_completion': {
-                                    'enabled': False
-                                },
-                                'jedi_completion': {
-                                    'enabled': True
-                                },
-                                'jedi_hover': {
-                                    'enabled': True
-                                },
-                                'jedi_references': {
-                                    'enabled': True
-                                },
-                                'jedi_signature_help': {
-                                    'enabled': True
-                                },
-                                'jedi_symbols': {
-                                    'enabled': True,
-                                    'all_scopes': True
-                                },
-                                'mccabe': {
-                                    'enabled': False,
-                                    'threshold': 15
-                                },
-                                'preload': {
-                                    'enabled': True,
-                                    'modules': []
-                                }
-                            },
-
-                        }
-                    }
-                }
-            })
+            ('lsp-server',
+             {
+              # This option is not used with the LSP server config
+              # It is used to disable hover hints in the editor
+              'enable_hover_hints': True,
+              'code_completion': True,
+              'jedi_definition': True,
+              'jedi_definition/follow_imports': True,
+              'jedi_signature_help': True,
+              'preload_modules': PRELOAD_MDOULES,
+              'pyflakes': True,
+              'mccabe': False,
+              'pycodestyle': False,
+              'pycodestyle/filename': '',
+              'pycodestyle/exclude': '',
+              'pycodestyle/select': '',
+              'pycodestyle/ignore': '',
+              'pycodestyle/max_line_length': 79,
+              'pydocstyle': False,
+              'pydocstyle/convention': 'numpy',
+              'pydocstyle/select': '',
+              'pydocstyle/ignore': '',
+              'pydocstyle/match': '(?!test_).*\\.py',
+              'pydocstyle/match_dir': '[^\\.].*',
+              'advanced/command_launch': 'pyls',
+              'advanced/host': '127.0.0.1',
+              'advanced/port': 2087,
+              'advanced/external': False
+             })
             ]
 
 
@@ -763,7 +715,7 @@ DEFAULTS = [
 #    or if you want to *rename* options, then you need to do a MAJOR update in
 #    version, e.g. from 3.0.0 to 4.0.0
 # 3. You don't need to touch this value if you're just adding a new option
-CONF_VERSION = '47.7.0'
+CONF_VERSION = '50.0.0'
 
 
 # Main configuration instance
