@@ -1382,7 +1382,7 @@ class DataFrameEditor(QDialog):
         self._autosized_cols = set()
         # self._max_autosize_ms = None
         # this is the time limit for resizing
-        self.setAutosizeLimit(0.0001)
+        self.setAutosizeLimitTime(0.0001)
         self.dataTable.installEventFilter(self)
 
         avg_width = self.fontMetrics().averageCharWidth()
