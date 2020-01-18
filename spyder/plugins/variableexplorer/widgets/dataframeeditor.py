@@ -1424,6 +1424,11 @@ class DataFrameEditor(QDialog):
 
         btn_layout.addStretch()
 
+        btn_save_csv = QPushButton(_('Save csv'))
+        btn_layout.addWidget(btn_save_csv)
+        btn_save_csv.clicked.connect(self.save_csv)
+        self.last_csv_path = "/tmp/dataframe.csv"
+
         self.btn_save_and_close = QPushButton(_('Save and Close'))
         self.btn_save_and_close.setDisabled(True)
         self.btn_save_and_close.clicked.connect(self.accept)
@@ -1902,6 +1907,18 @@ class DataFrameEditor(QDialog):
         # check index
         # non unique if not integer
         # TODO warning if more than 1 column selected
+
+    def save_csv(self):
+        path, valid = QInputDialog.getText(self, _('Save csv'),
+                                           _("Path:"),
+                                           QLineEdit.Normal,
+                                           self.last_csv_path)
+        if valid:
+            try:
+                self.dataModel.df.to_csv(path)
+                self.last_csv_path = path
+            except FileNotFoundError:
+                QMessageBox.critical(self, _("Error"), f"File not found error: {path}")
 
 
 # ==============================================================================
