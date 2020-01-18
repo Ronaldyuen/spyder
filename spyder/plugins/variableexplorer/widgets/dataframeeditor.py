@@ -888,8 +888,6 @@ class DataFrameView(QTableView):
     sig_sort_by_column = Signal()
     sig_fetch_more_columns = Signal()
     sig_fetch_more_rows = Signal()
-    sig_plot = Signal()
-    sig_subplot = Signal()
     sig_reset_and_scroll_to = Signal()
     sig_reset_sort_indicator = Signal()
 
@@ -1015,14 +1013,6 @@ class DataFrameView(QTableView):
                                     icon=ima.icon('editcopy'),
                                     triggered=self.copy,
                                     context=Qt.WidgetShortcut)
-        plot_action = create_action(self, _('Plot selected columns'),
-                                    icon=ima.icon('plot'),
-                                    triggered=self.sig_plot,
-                                    context=Qt.WidgetShortcut)
-        subplot_action = create_action(self, _('Plot selected columns with sublplots'),
-                                       icon=ima.icon('plot'),
-                                       triggered=self.sig_subplot,
-                                       context=Qt.WidgetShortcut)
         reset_action = create_action(self, _('Reset and scroll to'),
                                      icon=ima.icon('restore'),
                                      triggered=self.sig_reset_and_scroll_to,
@@ -1031,7 +1021,7 @@ class DataFrameView(QTableView):
                      (_("To int"), int), (_("To float"), float),
                      (_("To str"), to_text_string))
         types_in_menu = [copy_action]
-        types_in_menu += [plot_action, subplot_action, reset_action]
+        types_in_menu += [reset_action]
         for name, func in functions:
             slot = lambda func=func: self.change_type(func)
             types_in_menu += [create_action(self, name,
@@ -1402,9 +1392,6 @@ class DataFrameEditor(QDialog):
         # btn = QPushButton(_('Resize'))
         # btn_layout.addWidget(btn)
         # btn.clicked.connect(self.resize_to_contents)
-        btn = QPushButton(_('Plot'))
-        btn_layout.addWidget(btn)
-        btn.clicked.connect(self.plot_selected_columns)
 
         btn = QPushButton(_('Reset Filter'))
         btn_layout.addWidget(btn)
@@ -1539,8 +1526,6 @@ class DataFrameEditor(QDialog):
         self.dataTable.sig_sort_by_column.connect(self._sort_update)
         self.dataTable.sig_fetch_more_columns.connect(self._fetch_more_columns)
         self.dataTable.sig_fetch_more_rows.connect(self._fetch_more_rows)
-        self.dataTable.sig_plot.connect(self.plot_selected_columns)
-        self.dataTable.sig_subplot.connect(self.plot_selected_columns_subplot)
         self.dataTable.sig_reset_and_scroll_to.connect(self.reset_and_scroll_to)
         self.dataTable.sig_reset_sort_indicator.connect(self._reset_sort_indicator)
 
@@ -1897,61 +1882,6 @@ class DataFrameEditor(QDialog):
         if self.dataTable.sort_old != [None]:
             self.dataModel.sort(*self.dataTable.sort_old)
 
-    def plot_selected_columns(self, is_subplot=False):
-        # check selected Index
-        selected_idx = set([x.column() for x in self.dataTable.selectedIndexes()])
-        df = self.dataModel.df
-        plot_list = []
-        for idx, col in enumerate(df):
-            # filter non numbers
-            if df[col].dtype not in REAL_NUMBER_TYPES + COMPLEX_NUMBER_TYPES:
-                continue
-            # filter not selected
-            if selected_idx and idx not in selected_idx:
-                continue
-            plot_list.append((df[col], df.columns[idx]))
-        # import plotting libraries
-        try:
-            import plotly
-            use_plotly = True
-        except ImportError:
-            use_plotly = False
-        if use_plotly:
-            from plotly.offline import plot
-            import plotly.graph_objs as go
-            trace_list = []
-            for y, name in plot_list:
-                trace_list.append(go.Scatter(x=df.index, y=y, name=name))
-            fig = go.Figure(data=trace_list)
-            plot(fig)
-        else:
-            import spyder.pyplot as plt
-            plt.figure()
-            is_anything_plotted = False
-            plot_count = 1
-            for y, name in plot_list:
-                try:
-                    if not is_subplot:
-                        plt.plot(y, label=name, alpha=0.6)
-                    else:
-                        plt.subplot(len(selected_idx), 1, plot_count)
-                        plt.plot(y)
-                        plt.legend(loc='upper right')
-                        plot_count += 1
-                    is_anything_plotted = True
-                except ValueError:
-                    pass
-            if not is_anything_plotted:
-                plt.close()
-            else:
-                plt.xticks(rotation=90)
-                plt.tight_layout()
-                plt.legend()
-                plt.show()
-
-    def plot_selected_columns_subplot(self):
-        self.plot_selected_columns(is_subplot=True)
-
     def handleFilterActivated(self):
         self.set_filter(self.custom_header_view.getText())
         self.textbox.setText(self.dataModel.filtered_text)
@@ -1987,7 +1917,6 @@ def _test_edit(data, title="", parent=None):
     dlg = DataFrameEditor(parent=parent)
 
     if dlg.setup_and_check(data, title=title):
-        dlg.show()  # need this for plot to be able to close, like collectionseditor
         dlg.exec_()
         return dlg.get_value()
     else:
