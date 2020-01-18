@@ -100,7 +100,6 @@ def test_add_remove_breakpoint(code_editor_bot, mocker):
     reset_emits(editor)
     arb()
     assert block  # Block exists.
-    assert not block.userData()  # But user data not added to it.
     if version_info > (4, ):
         editor.sig_flags_changed.emit.assert_not_called()
     editor.sig_breakpoints_changed.emit.assert_not_called()
@@ -127,7 +126,7 @@ def test_add_remove_breakpoint(code_editor_bot, mocker):
 
     # Test adding condition on line containing code.
     reset_emits(editor)
-    block = editor.document().findBlockByLineNumber(3)  # Block is one less.
+    block = editor.document().findBlockByNumber(3)  # Block is one less.
     arb(line_number=4, condition='a > 50')
     editor_assert_helper(editor, block, bp=True, bpc='a > 50', emits=True)
 
@@ -147,14 +146,14 @@ def test_add_remove_breakpoint(code_editor_bot, mocker):
 
 def test_add_remove_breakpoint_with_edit_condition(code_editor_bot, mocker):
     """Test add/remove breakpoint with edit_condition."""
-    # For issue 2179.
+    # For spyder-ide/spyder#2179.
 
     editor, qtbot = code_editor_bot
     arb = editor.debugger.toogle_breakpoint
     mocker.patch.object(debugger.QInputDialog, 'getText')
 
     linenumber = 5
-    block = editor.document().findBlockByLineNumber(linenumber - 1)
+    block = editor.document().findBlockByNumber(linenumber - 1)
 
     # Call with edit_breakpoint on line that has never had a breakpoint set.
     # Once a line has a breakpoint set, it remains in userData(), which results
@@ -218,19 +217,19 @@ def test_clear_breakpoints(code_editor_bot):
     """Test CodeEditor.clear_breakpoints."""
     editor, qtbot = code_editor_bot
 
-    assert len(editor.blockuserdata_list) == 0
+    assert len(list(editor.blockuserdata_list())) == 1
 
     bp = [(1, None), (4, None)]
     editor.debugger.set_breakpoints(bp)
     assert editor.debugger.get_breakpoints() == bp
-    assert len(editor.blockuserdata_list) == 2
+    assert len(list(editor.blockuserdata_list())) == 2
 
     editor.debugger.clear_breakpoints()
     assert editor.debugger.get_breakpoints() == []
     # Even though there is a 'del data' that would pop the item from the
     # list, the __del__ funcion isn't called.
-    assert len(editor.blockuserdata_list) == 2
-    for data in editor.blockuserdata_list:
+    assert len(list(editor.blockuserdata_list())) == 2
+    for data in editor.blockuserdata_list():
         assert not data.breakpoint
 
 
@@ -244,12 +243,12 @@ def test_set_breakpoints(code_editor_bot):
     bp = [(1, 'a > b'), (4, None)]
     editor.debugger.set_breakpoints(bp)
     assert editor.debugger.get_breakpoints() == bp
-    assert editor.blockuserdata_list[0].breakpoint
+    assert list(editor.blockuserdata_list())[0].breakpoint
 
     bp = [(1, None), (5, 'c == 50')]
     editor.debugger.set_breakpoints(bp)
     assert editor.debugger.get_breakpoints() == bp
-    assert editor.blockuserdata_list[0].breakpoint
+    assert list(editor.blockuserdata_list())[0].breakpoint
 
 
 def test_update_breakpoints(code_editor_bot):

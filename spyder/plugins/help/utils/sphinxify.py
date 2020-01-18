@@ -50,10 +50,11 @@ from spyder.utils import encoding
 CONFDIR_PATH = get_module_source_path('spyder.plugins.help.utils')
 CSS_PATH = osp.join(CONFDIR_PATH, 'static', 'css')
 DARK_CSS_PATH = osp.join(CONFDIR_PATH, 'static', 'dark_css')
+BASE_CSS_PATH = osp.join(CONFDIR_PATH, 'static', 'base_css')
 JS_PATH = osp.join(CONFDIR_PATH, 'js')
 
 # To let Debian packagers redefine the MathJax and JQuery locations so they can
-# use their own packages for them. See Issue 1230, comment #7.
+# use their own packages for them. See spyder-ide/spyder#1230, comment #7.
 MATHJAX_PATH = get_module_data_path('spyder',
                                     relpath=osp.join('utils', 'help',
                                                      JS_PATH, 'mathjax'),
@@ -91,11 +92,20 @@ def usage(title, message, tutorial_message, tutorial, css_path=CSS_PATH):
                         tutorial_message=tutorial_message, tutorial=tutorial)
 
 
+def loading(message, loading_img, css_path=CSS_PATH):
+    """Print loading message on the rich text view."""
+    env = Environment()
+    env.loader = FileSystemLoader(osp.join(CONFDIR_PATH, 'templates'))
+    loading = env.get_template("loading.html")
+    return loading.render(
+        css_path=css_path, loading_img=loading_img, message=message)
+
+
 def generate_context(name='', argspec='', note='', math=False, collapse=False,
                      img_path='', css_path=CSS_PATH):
     """
     Generate the html_context dictionary for our Sphinx conf file.
-    
+
     This is a set of variables to be passed to the Jinja template engine and
     that are used to control how the webpage is rendered in connection with
     Sphinx
@@ -135,14 +145,16 @@ def generate_context(name='', argspec='', note='', math=False, collapse=False,
       'collapse': collapse,
       'img_path': img_path,
       # Static variables
+      'base_css_path': BASE_CSS_PATH,
       'css_path': css_path,
       'js_path': JS_PATH,
       'jquery_path': JQUERY_PATH,
       'mathjax_path': MATHJAX_PATH,
       'right_sphinx_version': '' if sphinx.__version__ < "1.1" else 'true',
+      'sphinx_version_2': '' if sphinx.__version__ < "2.0" else 'true',
       'platform': sys.platform
     }
-    
+
     return context
 
 
@@ -183,7 +195,11 @@ def sphinxify(docstring, context, buildername='html'):
     # docstrings
     if context['right_sphinx_version'] and context['math_on']:
         docstring = docstring.replace('\\\\', '\\\\\\\\')
-    
+        # Needed to prevent MathJax render the '\*' red.
+        # Also the '\*' seems to actually by a simple '*'
+        # See spyder-ide/spyder#9785
+        docstring = docstring.replace("\\*", "*")
+
     # Add a class to several characters on the argspec. This way we can
     # highlight them using css, in a similar way to what IPython does.
     # NOTE: Before doing this, we escape common html chars so that they
@@ -197,7 +213,7 @@ def sphinxify(docstring, context, buildername='html'):
     doc_file = codecs.open(rst_name, 'w', encoding='utf-8')
     doc_file.write(docstring)
     doc_file.close()
-    
+
     temp_confdir = False
     if temp_confdir:
         # TODO: This may be inefficient. Find a faster way to do it.
@@ -248,14 +264,14 @@ def generate_configuration(directory):
     directory : str
         Base directory to use
     """
-    
+
     # conf.py file for Sphinx
     conf = osp.join(get_module_source_path('spyder.plugins.help.utils'),
                     'conf.py')
 
     # Docstring layout page (in Jinja):
     layout = osp.join(osp.join(CONFDIR_PATH, 'templates'), 'layout.html')
-    
+
     os.makedirs(osp.join(directory, 'templates'))
     os.makedirs(osp.join(directory, 'static'))
     shutil.copy(conf, directory)

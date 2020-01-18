@@ -18,11 +18,15 @@ import argparse
 os.environ['SPYDER_PYTEST'] = 'True'
 
 # Third party imports
+# NOTE: This needs to be imported before any QApplication.
+# Don't remove it or change it to a different location!
+from qtpy import QtWebEngineWidgets
 import pytest
 
 
 # To run our slow tests only in our CIs
-RUN_CI = os.environ.get('CI', None) is not None
+CI = os.environ.get('CI', None) is not None
+RUN_SLOW = os.environ.get('RUN_SLOW', None) == 'true'
 
 
 def main(run_slow=False, extra_args=None):
@@ -34,9 +38,14 @@ def main(run_slow=False, extra_args=None):
                    '-rw',
                    '--durations=10']
 
-    if RUN_CI:
-        pytest_args += ['-x', '--cov=spyder', '--no-cov-on-fail',
-                        '--run-slow']
+    if CI:
+        # Exit on first failure and show coverage
+        pytest_args += ['-x', '--cov=spyder', '--no-cov-on-fail']
+
+        # Run slow tests only
+        if RUN_SLOW:
+            pytest_args += ['--run-slow']
+
         # To display nice tests resume in Azure's web page
         if os.environ.get('AZURE', None) is not None:
             pytest_args += ['--cache-clear', '--junitxml=result.xml']

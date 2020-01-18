@@ -52,7 +52,8 @@ def drift_color(base_color, factor=110):
 
 
 class BlockUserData(QTextBlockUserData):
-    def __init__(self, editor, cursor=None, color=None):
+    def __init__(self, editor, color=None, selection_start=None,
+                 selection_end=None):
         QTextBlockUserData.__init__(self)
         self.editor = editor
         self.breakpoint = False
@@ -60,18 +61,49 @@ class BlockUserData(QTextBlockUserData):
         self.bookmarks = []
         self.code_analysis = []
         self.todo = ''
-        self.selection = cursor
         self.color = color
-        self.editor.blockuserdata_list.append(self)
+        self.oedata = None
+        self.import_statement = None
+        self.selection_start = selection_start
+        self.selection_end = selection_end
 
-    def is_empty(self):
-        """Return whether the block of user data is empty."""
-        return (not self.breakpoint and not self.code_analysis
-                and not self.todo and not self.bookmarks)
+        # Add a reference to the user data in the editor as the block won't.
+        # The list should /not/ be used to list BlockUserData as the blocks
+        # they refer to might not exist anymore.
+        # This prevent a segmentation fault.
+        if editor is None:
+            # Won't be destroyed
+            self.refloop = self
+            return
+        # Destroy with the editor
+        if not hasattr(editor, '_user_data_reference_list'):
+            editor._user_data_reference_list = []
+        editor._user_data_reference_list.append(self)
 
-    def __del__(self):
-        bud_list = self.editor.blockuserdata_list
-        bud_list.pop(bud_list.index(self))
+    def _selection(self):
+        """
+        Function to compute the selection.
+
+        This is slow to call so it is only called when needed.
+        """
+        if self.selection_start is None or self.selection_end is None:
+            return None
+        document = self.editor.document()
+        cursor = self.editor.textCursor()
+        block = document.findBlockByNumber(self.selection_start['line'])
+        cursor.setPosition(block.position())
+        cursor.movePosition(QTextCursor.StartOfBlock)
+        cursor.movePosition(
+            QTextCursor.NextCharacter, n=self.selection_start['character'])
+        block2 = document.findBlockByNumber(
+            self.selection_end['line'])
+        cursor.setPosition(block2.position(), QTextCursor.KeepAnchor)
+        cursor.movePosition(
+            QTextCursor.StartOfBlock, mode=QTextCursor.KeepAnchor)
+        cursor.movePosition(
+            QTextCursor.NextCharacter, n=self.selection_end['character'],
+            mode=QTextCursor.KeepAnchor)
+        return QTextCursor(cursor)
 
 
 class DelayJobRunner(object):
@@ -195,11 +227,10 @@ class TextHelper(object):
         except KeyError:
             pass
         else:
-            from spyder.plugins.editor.utils.folding import FoldScope
-            if not block.isVisible():
-                block = FoldScope.find_parent_scope(block)
-                if TextBlockHelper.is_collapsed(block):
-                    folding_panel.toggle_fold_trigger(block)
+            if block.isVisible():
+                return
+            block = folding_panel.find_parent_scope(block)
+            folding_panel.toggle_fold_trigger(block)
 
     def selected_text(self):
         """Returns the selected text."""

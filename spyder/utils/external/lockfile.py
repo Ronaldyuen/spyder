@@ -27,9 +27,8 @@ __metaclass__ = type
 import errno, os
 from time import time as _uniquefloat
 
-import psutil
-from spyder.config.base import running_under_pytest
 from spyder.py3compat import PY2, to_binary_string
+from spyder.utils.programs import is_spyder_process
 
 def unique():
     if PY2:
@@ -56,14 +55,14 @@ else:
     # GetExitCodeProcess uses a special exit code to indicate that the
     # process is still running.
     STILL_ACTIVE = 259
-    
+
     def _is_pid_running(pid):
         """Taken from https://www.madebuild.org/blog/?p=30"""
         kernel32 = ctypes.windll.kernel32
         handle = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid)
         if handle == 0:
             return False
-         
+
         # If the process exited recently, a pid may still exist for the
         # handle. So, check if we can get the exit code.
         exit_code = wintypes.DWORD()
@@ -71,7 +70,7 @@ else:
                                              ctypes.byref(exit_code))
         is_running = (retval == 0)
         kernel32.CloseHandle(handle)
-         
+
         # See if we couldn't get the exit code or the exit code indicates
         # that the process is still running.
         return is_running or exit_code.value == STILL_ACTIVE
@@ -81,7 +80,7 @@ else:
             raise OSError(errno.ESRCH, None)
         else:
             return
-            
+
     _open = open
 
     # XXX Implement an atomic thingamajig for win32
@@ -190,22 +189,7 @@ class FilesystemLock:
                     try:
                         if kill is not None:
                             kill(int(pid), 0)
-                        # Verify that the running process corresponds to
-                        # a Spyder one
-                        p = psutil.Process(int(pid))
-
-                        # Valid names for main script
-                        names = set(['spyder', 'spyder3', 'spyder.exe',
-                                     'spyder3.exe', 'bootstrap.py',
-                                     'spyder-script.py'])
-                        if running_under_pytest():
-                            names.add('runtests.py')
-
-                        # Check the first three command line arguments
-                        arguments = set(os.path.basename(arg)
-                                        for arg in p.cmdline()[:3])
-                        conditions = [names & arguments]
-                        if not any(conditions):
+                        if not is_spyder_process(int(pid)):
                             raise(OSError(errno.ESRCH, 'No such process'))
                     except OSError as e:
                         if e.errno == errno.ESRCH:

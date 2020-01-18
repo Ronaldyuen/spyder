@@ -23,12 +23,13 @@ import pytest
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 import numpy as np
-from qtpy.QtWidgets import QApplication
+from qtpy.QtWidgets import QApplication, QStyle
 from qtpy.QtGui import QPixmap
 from qtpy.QtCore import Qt
 
 # Local imports
-from spyder.plugins.plots.widgets.figurebrowser import FigureBrowser
+from spyder.plugins.plots.widgets.figurebrowser import (FigureBrowser,
+                                                        FigureThumbnail)
 from spyder.py3compat import to_text_string
 
 
@@ -210,6 +211,23 @@ def test_close_all_figures(figbrowser, tmpdir, fmt):
     assert figbrowser.thumbnails_sb.get_current_index() == -1
     assert figbrowser.thumbnails_sb.current_thumbnail is None
     assert figbrowser.figviewer.figcanvas.fig is None
+    assert len(figbrowser.thumbnails_sb.findChildren(FigureThumbnail)) == 0
+
+
+@pytest.mark.parametrize("fmt", ['image/png', 'image/svg+xml'])
+def test_close_one_thumbnail(figbrowser, tmpdir, fmt):
+    """
+    Test the thumbnail is removed from the GUI.
+    """
+    # Add two figures to the browser
+    add_figures_to_browser(figbrowser, 2, tmpdir, fmt)
+    assert len(figbrowser.thumbnails_sb.findChildren(FigureThumbnail)) == 2
+
+    # Remove the first figure
+    figures = figbrowser.thumbnails_sb.findChildren(FigureThumbnail)
+    figbrowser.thumbnails_sb.remove_thumbnail(figures[0])
+
+    assert len(figbrowser.thumbnails_sb.findChildren(FigureThumbnail)) == 1
 
 
 @pytest.mark.parametrize("fmt", ['image/png', 'image/svg+xml'])
@@ -256,6 +274,34 @@ def test_scroll_to_item(figbrowser, tmpdir, qtbot):
     expected = (spacing * (nfig // 2)) + (height * (nfig // 2 - 1)) - \
                ((height_view - height) // 2)
 
+    vsb = figbrowser.thumbnails_sb.scrollarea.verticalScrollBar()
+    assert vsb.value() == expected
+
+
+def test_scroll_down_to_newest_plot(figbrowser, tmpdir, qtbot):
+    """
+    Test that the ThumbnailScrollBar is scrolled to the newest plot after
+    it is added to it.
+
+    Test that covers spyder-ide/spyder#10914.
+    """
+    figbrowser.setFixedSize(500, 500)
+
+    nfig = 8
+    for i in range(8):
+        newfig = create_figure(
+            osp.join(to_text_string(tmpdir), 'new_mplfig{}.png'.format(i)))
+        figbrowser._handle_new_figure(newfig, 'image/png')
+        qtbot.wait(500)
+
+    # Assert that the scrollbar range was updated correctly and that it's
+    # value was set to its maximum.
+    height_view = figbrowser.thumbnails_sb.scrollarea.viewport().height()
+    scene = figbrowser.thumbnails_sb.scene
+    spacing = scene.verticalSpacing()
+    height = scene.itemAt(0).sizeHint().height()
+
+    expected = (spacing * (nfig - 1)) + (height * nfig) - height_view
     vsb = figbrowser.thumbnails_sb.scrollarea.verticalScrollBar()
     assert vsb.value() == expected
 
@@ -380,9 +426,10 @@ def test_zoom_figure_viewer(figbrowser, tmpdir, fmt):
         scaling_factor += zoom_step
         scale = scaling_step**scaling_factor
 
-        assert figbrowser.zoom_disp.value() == np.floor(scale * 100)
-        assert figcanvas.width() == np.floor(fwidth * scale)
-        assert figcanvas.height() == np.floor(fheight * scale)
+        assert (figbrowser.zoom_disp.value() ==
+                np.round(int(fwidth * scale) / fwidth * 100))
+        assert figcanvas.width() == int(fwidth * scale)
+        assert figcanvas.height() == int(fheight * scale)
 
 
 @pytest.mark.parametrize("fmt", ['image/png', 'image/svg+xml'])
@@ -402,12 +449,15 @@ def test_autofit_figure_viewer(figbrowser, tmpdir, fmt):
     # Test when `Fit plots to window` is set to True.
     # Otherwise, test should fall into `test_zoom_figure_viewer`
     figbrowser.change_auto_fit_plotting(True)
-    size = figviewer.size()
 
-    scrollbar_width = figviewer.verticalScrollBar().sizeHint().width()
-    width = size.width() - scrollbar_width
-    scrollbar_height = figviewer.horizontalScrollBar().sizeHint().height()
-    height = size.height() - scrollbar_height
+    size = figviewer.size()
+    style = figviewer.style()
+    width = (size.width() -
+             style.pixelMetric(QStyle.PM_LayoutLeftMargin) -
+             style.pixelMetric(QStyle.PM_LayoutRightMargin))
+    height = (size.height() -
+              style.pixelMetric(QStyle.PM_LayoutTopMargin) -
+              style.pixelMetric(QStyle.PM_LayoutBottomMargin))
     if (fwidth / fheight) > (width / height):
         new_width = int(width)
         new_height = int(width / fwidth * fheight)
@@ -417,6 +467,8 @@ def test_autofit_figure_viewer(figbrowser, tmpdir, fmt):
 
     assert figcanvas.width() == new_width
     assert figcanvas.height() == new_height
+    assert (figbrowser.zoom_disp.value() ==
+            round(figcanvas.width() / fwidth * 100))
 
 
 if __name__ == "__main__":

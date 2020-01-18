@@ -1,19 +1,31 @@
-cloudpickle
-pygments >=2.0
-qtconsole >=4.2.0
-nbconvert
-sphinx
-pylint
-psutil
-qtawesome >=0.5.2
-qtpy >=1.5.0
-pickleshare
-pyzmq
-chardet >=2.0.0
-numpydoc
-pyqt <5.10
-keyring
-spyder-kernels >=1.2
-python-language-server >=0.19
-qdarkstyle >=2.6.4
+# We can not refer to an environment.yml file from another
+# So to get performant launches on mybinder.org, we have copied
+# the contents of this file to binder/environment.yml. If you
+# make changes here, please copy them over there too.
+applaunchservices
 atomicwrites
+chardet >=2.0.0
+cloudpickle
+diff-match-patch
+intervaltree
+jedi =0.14.1
+keyring
+nbconvert
+numpydoc
+pexpect
+pickleshare
+psutil
+pygments >=2.0
+pylint
+pyqt <5.13
+python-language-server >=0.31.2,<0.32.0
+pyxdg
+pyzmq
+qdarkstyle >=2.7
+qtawesome >=0.5.7
+qtconsole >=4.6.0
+qtpy >=1.5.0
+rtree
+sphinx
+spyder-kernels >=1.8.1,<2.0.0
+watchdog

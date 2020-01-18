@@ -17,7 +17,6 @@ import logging
 import os
 import os.path as osp
 import sys
-from collections import MutableSequence
 import unicodedata
 
 # Third party imports
@@ -33,20 +32,22 @@ from qtpy.QtWidgets import (QAction, QApplication, QFileDialog, QHBoxLayout,
 
 # Local imports
 from spyder.config.base import _, running_under_pytest
-from spyder.config.gui import config_shortcut, is_dark_interface, get_shortcut
+from spyder.config.gui import is_dark_interface
+from spyder.config.manager import CONF
 from spyder.config.utils import (get_edit_filetypes, get_edit_filters,
                                  get_filter, is_kde_desktop, is_anaconda)
-from spyder.py3compat import qbytearray_to_str, to_text_string
+from spyder.py3compat import (qbytearray_to_str, to_text_string,
+                              MutableSequence)
 from spyder.utils import icon_manager as ima
 from spyder.utils import encoding, sourcecode, syntaxhighlighters
 from spyder.utils.qthelpers import (add_actions, create_action,
                                     create_toolbutton, MENU_SEPARATOR,
-                                    mimedata2url)
+                                    mimedata2url, set_menu_icons)
 from spyder.plugins.outlineexplorer.widgets import OutlineExplorerWidget
 from spyder.plugins.outlineexplorer.editor import OutlineExplorerProxyEditor
-from spyder.widgets.fileswitcher import FileSwitcher
 from spyder.widgets.findreplace import FindReplace
 from spyder.plugins.editor.utils.autosave import AutosaveForStack
+from spyder.plugins.editor.utils.switcher import EditorSwitcherManager
 from spyder.plugins.editor.widgets import codeeditor
 from spyder.plugins.editor.widgets.base import TextEditBaseWidget  # analysis:ignore
 from spyder.plugins.editor.widgets.codeeditor import Printer       # analysis:ignore
@@ -56,8 +57,10 @@ from spyder.plugins.editor.widgets.status import (CursorPositionStatus,
                                                   ReadWriteStatus, VCSStatus)
 from spyder.plugins.editor.utils.findtasks import find_tasks
 from spyder.widgets.tabs import BaseTabs
-from spyder.config.main import CONF
-from spyder.plugins.explorer.widgets import show_in_external_file_explorer
+from spyder.config.manager import CONF
+from spyder.plugins.explorer.widgets.explorer import (
+    show_in_external_file_explorer)
+from spyder.plugins.outlineexplorer.api import cell_name
 
 
 logger = logging.getLogger(__name__)
@@ -164,9 +167,10 @@ class FileInfo(QObject):
     sig_save_bookmarks = Signal(str, str)
     text_changed_at = Signal(str, int)
     edit_goto = Signal(str, int, str)
-    send_to_help = Signal(str, str, str, str, bool)
+    sig_send_to_help = Signal(str, str, bool)
     sig_filename_changed = Signal(str)
     sig_show_object_info = Signal(int)
+    sig_show_completion_object_info = Signal(str, str)
 
     def __init__(self, filename, encoding, editor, new, threadmanager):
         QObject.__init__(self)
@@ -185,6 +189,8 @@ class FileInfo(QObject):
         self.editor.textChanged.connect(self.text_changed)
         self.editor.sig_bookmarks_changed.connect(self.bookmarks_changed)
         self.editor.sig_show_object_info.connect(self.sig_show_object_info)
+        self.editor.sig_show_completion_object_info.connect(
+            self.sig_send_to_help)
         self.sig_filename_changed.connect(self.editor.sig_filename_changed)
 
     @property
@@ -199,7 +205,6 @@ class FileInfo(QObject):
     def text_changed(self):
         """Editor's text has changed"""
         self.default = False
-        self.editor.document().changed_since_autosave = True
         self.text_changed_at.emit(self.filename,
                                   self.editor.get_position('cursor'))
 
@@ -320,10 +325,10 @@ class TabSwitcherWidget(QListWidget):
         self.set_dialog_position()
         self.setCurrentRow(0)
 
-        config_shortcut(lambda: self.select_row(-1), context='Editor',
-                        name='Go to previous file', parent=self)
-        config_shortcut(lambda: self.select_row(1), context='Editor',
-                        name='Go to next file', parent=self)
+        CONF.config_shortcut(lambda: self.select_row(-1), context='Editor',
+                             name='Go to previous file', parent=self)
+        CONF.config_shortcut(lambda: self.select_row(1), context='Editor',
+                             name='Go to next file', parent=self)
 
     def load_data(self):
         """Fill ListWidget with the tabs texts.
@@ -363,7 +368,8 @@ class TabSwitcherWidget(QListWidget):
     def set_dialog_position(self):
         """Positions the tab switcher in the top-center of the editor."""
         left = self.editor.geometry().width()/2 - self.width()/2
-        top = self.editor.tabs.tabBar().geometry().height()
+        top = (self.editor.tabs.tabBar().geometry().height() +
+               self.editor.fname_label.geometry().height())
 
         self.move(self.editor.mapToGlobal(QPoint(left, top)))
 
@@ -374,7 +380,7 @@ class TabSwitcherWidget(QListWidget):
         When ctrl is released and tab_switcher is visible, tab will be changed.
         """
         if self.isVisible():
-            qsc = get_shortcut(context='Editor', name='Go to next file')
+            qsc = CONF.get_shortcut(context='Editor', name='Go to next file')
 
             for key in qsc.split('+'):
                 key = key.lower()
@@ -412,7 +418,8 @@ class EditorStack(QWidget):
     ending_long_process = Signal(str)
     redirect_stdio = Signal(bool)
     exec_in_extconsole = Signal(str, bool)
-    run_cell_in_ipyclient = Signal(str, str, str, bool)
+    run_cell_in_ipyclient = Signal(str, object, str, bool)
+    debug_cell_in_ipyclient = Signal(str, object, str, bool)
     update_plugin_title = Signal()
     editor_focus_changed = Signal()
     zoom_in = Signal()
@@ -443,7 +450,7 @@ class EditorStack(QWidget):
     sig_prev_warning = Signal()
     sig_next_warning = Signal()
     sig_go_to_definition = Signal(str, int, int)
-    perform_lsp_request = Signal(str, str, dict)
+    sig_perform_completion_request = Signal(str, str, dict)
     sig_option_changed = Signal(str, object)  # config option needs changing
     sig_save_bookmark = Signal(int)
     sig_load_bookmark = Signal(int)
@@ -466,7 +473,8 @@ class EditorStack(QWidget):
         self.setLayout(layout)
 
         self.menu = None
-        self.fileswitcher_dlg = None
+        self.switcher_dlg = None
+        self.switcher_manager = None
 #        self.filelist_btn = None
 #        self.previous_btn = None
 #        self.next_btn = None
@@ -480,13 +488,17 @@ class EditorStack(QWidget):
         self.find_widget = None
 
         self.data = []
-        fileswitcher_action = create_action(self, _("File switcher..."),
-                icon=ima.icon('filelist'),
-                triggered=self.open_fileswitcher_dlg)
-        symbolfinder_action = create_action(self,
-                _("Find symbols in file..."),
-                icon=ima.icon('symbol_find'),
-                triggered=self.open_symbolfinder_dlg)
+
+        switcher_action = create_action(
+            self,
+            _("File switcher..."),
+            icon=ima.icon('filelist'),
+            triggered=self.open_switcher_dlg)
+        symbolfinder_action = create_action(
+            self,
+            _("Find symbols in file..."),
+            icon=ima.icon('symbol_find'),
+            triggered=self.open_symbolfinder_dlg)
         copy_to_cb_action = create_action(self, _("Copy path to clipboard"),
                 icon=ima.icon('editcopy'),
                 triggered=lambda:
@@ -507,7 +519,7 @@ class EditorStack(QWidget):
                                 triggered=self.show_in_external_file_explorer)
 
         self.menu_actions = actions + [external_fileexp_action,
-                                       None, fileswitcher_action,
+                                       None, switcher_action,
                                        symbolfinder_action,
                                        copy_to_cb_action, None, close_right,
                                        close_all_but_this, sort_tabs]
@@ -539,11 +551,20 @@ class EditorStack(QWidget):
         self.default_font = None
         self.wrap_enabled = False
         self.tabmode_enabled = False
+        self.stripmode_enabled = False
         self.intelligent_backspace_enabled = True
+        self.automatic_completions_enabled = True
+        self.automatic_completion_chars = 3
+        self.automatic_completion_ms = 300
+        self.completions_hint_enabled = True
+        self.completions_hint_after_ms = 500
+        self.hover_hints_enabled = True
+        self.code_snippets_enabled = True
+        self.underline_errors_enabled = False
         self.highlight_current_line_enabled = False
         self.highlight_current_cell_enabled = False
         self.occurrence_highlighting_enabled = True
-        self.occurrence_highlighting_timeout=1500
+        self.occurrence_highlighting_timeout = 1500
         self.checkeolchars_enabled = True
         self.always_remove_trailing_spaces = False
         self.convert_eol_on_save = False
@@ -589,6 +610,8 @@ class EditorStack(QWidget):
         # Autusave component
         self.autosave = AutosaveForStack(self)
 
+        self.last_cell_call = None
+
     @Slot()
     def show_in_external_file_explorer(self, fnames=None):
         """Show file in external file explorer"""
@@ -599,131 +622,226 @@ class EditorStack(QWidget):
     def create_shortcuts(self):
         """Create local shortcuts"""
         # --- Configurable shortcuts
-        inspect = config_shortcut(self.inspect_current_object, context='Editor',
-                                  name='Inspect current object', parent=self)
+        inspect = CONF.config_shortcut(
+            self.inspect_current_object,
+            context='Editor',
+            name='Inspect current object',
+            parent=self)
         # TODO: Cleaner way to do this?
+        # This should be called from the plugin and not the widgets
         app = QCoreApplication.instance()
-        set_breakpoint = config_shortcut(self.set_or_clear_breakpoint,
-                                         context='Editor', name='Breakpoint',
-                                         parent=self)
-        set_cond_breakpoint = config_shortcut(
-                                    self.set_or_edit_conditional_breakpoint,
-                                    context='Editor',
-                                    name='Conditional breakpoint',
-                                    parent=self)
-        gotoline = config_shortcut(self.go_to_line, context='Editor',
-                                   name='Go to line', parent=self)
-        tab = config_shortcut(lambda: self.tab_navigation_mru(forward=False),
-                              context='Editor',
-                              name='Go to previous file', parent=self)
-        tabshift = config_shortcut(self.tab_navigation_mru, context='Editor',
-                                   name='Go to next file', parent=self)
-        prevtab = config_shortcut(lambda: self.tabs.tab_navigate(-1),
-                                  context='Editor',
-                                  name='Cycle to previous file', parent=self)
-        nexttab = config_shortcut(lambda: self.tabs.tab_navigate(1),
-                                  context='Editor',
-                                  name='Cycle to next file', parent=self)
-        run_selection = config_shortcut(self.run_selection, context='Editor',
-                                        name='Run selection', parent=self)
-        new_file = config_shortcut(lambda : self.sig_new_file[()].emit(),
-                                   context='Editor', name='New file',
-                                   parent=self)
-        open_file = config_shortcut(lambda : self.plugin_load[()].emit(),
-                                    context='Editor', name='Open file',
-                                    parent=self)
-        save_file = config_shortcut(self.save, context='Editor',
-                                    name='Save file', parent=self)
-        save_all = config_shortcut(self.save_all, context='Editor',
-                                   name='Save all', parent=self)
-        save_as = config_shortcut(lambda : self.sig_save_as.emit(),
-                                  context='Editor', name='Save As',
-                                  parent=self)
-        close_all = config_shortcut(self.close_all_files, context='Editor',
-                                    name='Close all', parent=self)
-        prev_edit_pos = config_shortcut(lambda : self.sig_prev_edit_pos.emit(),
-                                        context="Editor",
-                                        name="Last edit location",
-                                        parent=self)
-        prev_cursor = config_shortcut(lambda : self.sig_prev_cursor.emit(),
-                                      context="Editor",
-                                      name="Previous cursor position",
-                                      parent=self)
-        next_cursor = config_shortcut(lambda : self.sig_next_cursor.emit(),
-                                      context="Editor",
-                                      name="Next cursor position",
-                                      parent=self)
-        zoom_in_1 = config_shortcut(lambda : self.zoom_in.emit(),
-                                      context="Editor",
-                                      name="zoom in 1",
-                                      parent=self)
-        zoom_in_2 = config_shortcut(lambda : self.zoom_in.emit(),
-                                      context="Editor",
-                                      name="zoom in 2",
-                                      parent=self)
-        zoom_out = config_shortcut(lambda : self.zoom_out.emit(),
-                                      context="Editor",
-                                      name="zoom out",
-                                      parent=self)
-        zoom_reset = config_shortcut(lambda: self.zoom_reset.emit(),
-                                      context="Editor",
-                                      name="zoom reset",
-                                      parent=self)
-        close_file_1 = config_shortcut(self.close_file,
-                                      context="Editor",
-                                      name="close file 1",
-                                      parent=self)
-        close_file_2 = config_shortcut(self.close_file,
-                                      context="Editor",
-                                      name="close file 2",
-                                      parent=self)
-        run_cell = config_shortcut(self.run_cell,
-                                      context="Editor",
-                                      name="run cell",
-                                      parent=self)
-        run_cell_and_advance = config_shortcut(self.run_cell_and_advance,
-                                      context="Editor",
-                                      name="run cell and advance",
-                                      parent=self)
-        go_to_next_cell = config_shortcut(self.advance_cell,
-                                          context="Editor",
-                                          name="go to next cell",
-                                          parent=self)
-        go_to_previous_cell = config_shortcut(lambda: self.advance_cell(reverse=True),
-                                              context="Editor",
-                                              name="go to previous cell",
-                                              parent=self)
-        re_run_last_cell = config_shortcut(self.re_run_last_cell,
-                                      context="Editor",
-                                      name="re-run last cell",
-                                      parent=self)
-        prev_warning = config_shortcut(lambda: self.sig_prev_warning.emit(),
-                                       context="Editor",
-                                       name="Previous warning",
-                                       parent=self)
-        next_warning = config_shortcut(lambda: self.sig_next_warning.emit(),
-                                       context="Editor",
-                                       name="Next warning",
-                                       parent=self)
-        split_vertically = config_shortcut(lambda: self.sig_split_vertically.emit(),
-                                           context="Editor",
-                                           name="split vertically",
-                                           parent=self)
-        split_horizontally = config_shortcut(lambda: self.sig_split_horizontally.emit(),
-                                             context="Editor",
-                                             name="split horizontally",
-                                             parent=self)
-        close_split = config_shortcut(self.close_split,
-                                      context="Editor",
-                                      name="close split panel",
-                                      parent=self)
+
+        set_breakpoint = CONF.config_shortcut(
+            self.set_or_clear_breakpoint,
+            context='Editor',
+            name='Breakpoint',
+            parent=self)
+
+        set_cond_breakpoint = CONF.config_shortcut(
+            self.set_or_edit_conditional_breakpoint,
+            context='Editor',
+            name='Conditional breakpoint',
+            parent=self)
+
+        gotoline = CONF.config_shortcut(
+            self.go_to_line,
+            context='Editor',
+            name='Go to line',
+            parent=self)
+
+        tab = CONF.config_shortcut(
+            lambda: self.tab_navigation_mru(forward=False),
+            context='Editor',
+            name='Go to previous file',
+            parent=self)
+
+        tabshift = CONF.config_shortcut(
+            self.tab_navigation_mru,
+            context='Editor',
+            name='Go to next file',
+            parent=self)
+
+        prevtab = CONF.config_shortcut(
+            lambda: self.tabs.tab_navigate(-1),
+            context='Editor',
+            name='Cycle to previous file',
+            parent=self)
+
+        nexttab = CONF.config_shortcut(
+            lambda: self.tabs.tab_navigate(1),
+            context='Editor',
+            name='Cycle to next file',
+            parent=self)
+
+        run_selection = CONF.config_shortcut(
+            self.run_selection,
+            context='Editor',
+            name='Run selection',
+            parent=self)
+
+        new_file = CONF.config_shortcut(
+            lambda: self.sig_new_file[()].emit(),
+            context='Editor',
+            name='New file',
+            parent=self)
+
+        open_file = CONF.config_shortcut(
+            lambda: self.plugin_load[()].emit(),
+            context='Editor',
+            name='Open file',
+            parent=self)
+
+        save_file = CONF.config_shortcut(
+            self.save,
+            context='Editor',
+            name='Save file',
+            parent=self)
+
+        save_all = CONF.config_shortcut(
+            self.save_all,
+            context='Editor',
+            name='Save all',
+            parent=self)
+
+        save_as = CONF.config_shortcut(
+            lambda: self.sig_save_as.emit(),
+            context='Editor',
+            name='Save As',
+            parent=self)
+
+        close_all = CONF.config_shortcut(
+            self.close_all_files,
+            context='Editor',
+            name='Close all',
+            parent=self)
+
+        prev_edit_pos = CONF.config_shortcut(
+            lambda: self.sig_prev_edit_pos.emit(),
+            context="Editor",
+            name="Last edit location",
+            parent=self)
+
+        prev_cursor = CONF.config_shortcut(
+            lambda: self.sig_prev_cursor.emit(),
+            context="Editor",
+            name="Previous cursor position",
+            parent=self)
+
+        next_cursor = CONF.config_shortcut(
+            lambda: self.sig_next_cursor.emit(),
+            context="Editor",
+            name="Next cursor position",
+            parent=self)
+
+        zoom_in_1 = CONF.config_shortcut(
+            lambda: self.zoom_in.emit(),
+            context="Editor",
+            name="zoom in 1",
+            parent=self)
+
+        zoom_in_2 = CONF.config_shortcut(
+            lambda: self.zoom_in.emit(),
+            context="Editor",
+            name="zoom in 2",
+            parent=self)
+
+        zoom_out = CONF.config_shortcut(
+            lambda: self.zoom_out.emit(),
+            context="Editor",
+            name="zoom out",
+            parent=self)
+
+        zoom_reset = CONF.config_shortcut(
+            lambda: self.zoom_reset.emit(),
+            context="Editor",
+            name="zoom reset",
+            parent=self)
+
+        close_file_1 = CONF.config_shortcut(
+            self.close_file,
+            context="Editor",
+            name="close file 1",
+            parent=self)
+
+        close_file_2 = CONF.config_shortcut(
+            self.close_file,
+            context="Editor",
+            name="close file 2",
+            parent=self)
+
+        run_cell = CONF.config_shortcut(
+            self.run_cell,
+            context="Editor",
+            name="run cell",
+            parent=self)
+
+        debug_cell = CONF.config_shortcut(
+            self.debug_cell,
+            context="Editor",
+            name="debug cell",
+            parent=self)
+
+        run_cell_and_advance = CONF.config_shortcut(
+            self.run_cell_and_advance,
+            context="Editor",
+            name="run cell and advance",
+            parent=self)
+
+        go_to_next_cell = CONF.config_shortcut(
+            self.advance_cell,
+            context="Editor",
+            name="go to next cell",
+            parent=self)
+
+        go_to_previous_cell = CONF.config_shortcut(
+            lambda: self.advance_cell(reverse=True),
+            context="Editor",
+            name="go to previous cell",
+            parent=self)
+
+        re_run_last_cell = CONF.config_shortcut(
+            self.re_run_last_cell,
+            context="Editor",
+            name="re-run last cell",
+            parent=self)
+
+        prev_warning = CONF.config_shortcut(
+            lambda: self.sig_prev_warning.emit(),
+            context="Editor",
+            name="Previous warning",
+            parent=self)
+
+        next_warning = CONF.config_shortcut(
+            lambda: self.sig_next_warning.emit(),
+            context="Editor",
+            name="Next warning",
+            parent=self)
+
+        split_vertically = CONF.config_shortcut(
+            lambda: self.sig_split_vertically.emit(),
+            context="Editor",
+            name="split vertically",
+            parent=self)
+
+        split_horizontally = CONF.config_shortcut(
+            lambda: self.sig_split_horizontally.emit(),
+            context="Editor",
+            name="split horizontally",
+            parent=self)
+
+        close_split = CONF.config_shortcut(
+            self.close_split,
+            context="Editor",
+            name="close split panel",
+            parent=self)
 
         # Return configurable ones
         return [inspect, set_breakpoint, set_cond_breakpoint, gotoline, tab,
                 tabshift, run_selection, new_file, open_file, save_file,
                 save_all, save_as, close_all, prev_edit_pos, prev_cursor,
                 next_cursor, zoom_in_1, zoom_in_2, zoom_out, zoom_reset,
-                close_file_1, close_file_2, run_cell, run_cell_and_advance,
+                close_file_1, close_file_2, run_cell, debug_cell,
+                run_cell_and_advance,
                 go_to_next_cell, go_to_previous_cell, re_run_last_cell,
                 prev_warning, next_warning, split_vertically,
                 split_horizontally, close_split,
@@ -776,7 +894,7 @@ class EditorStack(QWidget):
            and not sys.platform == 'darwin':
             # Don't set document mode to true on OSX because it generates
             # a crash when the editor is detached from the main window
-            # Fixes Issue 561
+            # Fixes spyder-ide/spyder#561.
             self.tabs.setDocumentMode(True)
         self.tabs.currentChanged.connect(self.current_changed)
 
@@ -789,6 +907,17 @@ class EditorStack(QWidget):
             layout.addWidget(tab_container)
         else:
             layout.addWidget(self.tabs)
+
+        # Show/hide icons in plugin menus for Mac
+        if sys.platform == 'darwin':
+            self.menu.aboutToHide.connect(
+                lambda menu=self.menu:
+                set_menu_icons(menu, False))
+
+    def hide_tooltip(self):
+        """Hide any open tooltips."""
+        for finfo in self.data:
+            finfo.editor.hide_tooltip()
 
     @Slot()
     def update_fname_label(self):
@@ -819,6 +948,8 @@ class EditorStack(QWidget):
             for finfo in self.data:
                 self.outlineexplorer.remove_editor(finfo.editor.oe_proxy)
 
+        for finfo in self.data:
+            finfo.editor.notify_close()
         QWidget.closeEvent(self, event)
 
     def clone_editor_from(self, other_finfo, set_current):
@@ -838,29 +969,48 @@ class EditorStack(QWidget):
         self.set_stack_index(other.get_stack_index())
 
     @Slot()
-    def open_fileswitcher_dlg(self):
+    @Slot(str)
+    def open_switcher_dlg(self, initial_text=''):
         """Open file list management dialog box"""
         if not self.tabs.count():
             return
-        if self.fileswitcher_dlg is not None and \
-          self.fileswitcher_dlg.is_visible:
-            self.fileswitcher_dlg.hide()
-            self.fileswitcher_dlg.is_visible = False
+        if self.switcher_dlg is not None and self.switcher_dlg.isVisible():
+            self.switcher_dlg.hide()
+            self.switcher_dlg.clear()
             return
-        self.fileswitcher_dlg = FileSwitcher(self, self, self.tabs, self.data,
-                                             ima.icon('TextFileIcon'))
-        self.fileswitcher_dlg.sig_goto_file.connect(self.set_stack_index)
-        self.fileswitcher_dlg.show()
-        self.fileswitcher_dlg.is_visible = True
+        if self.switcher_dlg is None:
+            from spyder.widgets.switcher import Switcher
+            self.switcher_dlg = Switcher(self)
+            self.switcher_manager = EditorSwitcherManager(
+                self.get_plugin(),
+                self.switcher_dlg,
+                lambda: self.get_current_editor(),
+                lambda: self,
+                section=self.get_plugin_title())
+
+        self.switcher_dlg.set_search_text(initial_text)
+        self.switcher_dlg.setup()
+        self.switcher_dlg.show()
+        # Note: the +1 pixel on the top makes it look better
+        delta_top = (self.tabs.tabBar().geometry().height() +
+                     self.fname_label.geometry().height() + 1)
+        self.switcher_dlg.set_position(delta_top)
 
     @Slot()
     def open_symbolfinder_dlg(self):
-        self.open_fileswitcher_dlg()
-        self.fileswitcher_dlg.set_search_text('@')
+        self.open_switcher_dlg(initial_text='@')
 
-    def get_current_tab_manager(self):
-        """Get the widget with the TabWidget attribute."""
-        return self
+    def get_plugin(self):
+        """Get the plugin of the parent widget."""
+        # Needed for the editor stack to use its own switcher instance.
+        # See spyder-ide/spyder#10684.
+        return self.parent().plugin
+
+    def get_plugin_title(self):
+        """Get the plugin title of the parent widget."""
+        # Needed for the editor stack to use its own switcher instance.
+        # See spyder-ide/spyder#9469.
+        return self.get_plugin().get_plugin_title()
 
     def go_to_line(self, line=None):
         """Go to line dialog"""
@@ -895,10 +1045,17 @@ class EditorStack(QWidget):
         editor = self.get_current_editor()
         editor.sig_display_object_info.connect(self.display_help)
         cursor = None
+        offset = editor.get_position('cursor')
         if pos:
             cursor = editor.get_last_hover_cursor()
+            if cursor:
+                offset = cursor.position()
+            else:
+                return
+
         line, col = editor.get_cursor_line_column(cursor)
-        editor.request_hover(line, col, show_hint=False, clicked=bool(pos))
+        editor.request_hover(line, col, offset,
+                             show_hint=False, clicked=bool(pos))
 
     @Slot(str, bool)
     def display_help(self, help_text, clicked):
@@ -906,9 +1063,13 @@ class EditorStack(QWidget):
         if clicked:
             name = editor.get_last_hover_word()
         else:
-            name = editor.get_current_word()
-
-        editor.sig_display_object_info.disconnect(self.display_help)
+            name = editor.get_current_word(help_req=True)
+        try:
+            editor.sig_display_object_info.disconnect(self.display_help)
+        except TypeError:
+            # Needed to prevent an error after some time in idle.
+            # See spyder-ide/spyder#11228
+            pass
         self.help.switch_to_editor_source()
         self.send_to_help(name, help_text, force=True)
 
@@ -1098,12 +1259,61 @@ class EditorStack(QWidget):
             for finfo in self.data:
                 finfo.editor.set_tab_mode(state)
 
+    def set_stripmode_enabled(self, state):
+        # CONF.get(self.CONF_SECTION, 'strip_trailing_spaces_on_modify')
+        self.stripmode_enabled = state
+        if self.data:
+            for finfo in self.data:
+                finfo.editor.set_strip_mode(state)
+
     def set_intelligent_backspace_enabled(self, state):
         # CONF.get(self.CONF_SECTION, 'intelligent_backspace')
         self.intelligent_backspace_enabled = state
         if self.data:
             for finfo in self.data:
                 finfo.editor.toggle_intelligent_backspace(state)
+
+    def set_code_snippets_enabled(self, state):
+        self.code_snippets_enabled = state
+        if self.data:
+            for finfo in self.data:
+                finfo.editor.toggle_code_snippets(state)
+
+    def set_automatic_completions_enabled(self, state):
+        self.automatic_completions_enabled = state
+        if self.data:
+            for finfo in self.data:
+                finfo.editor.toggle_automatic_completions(state)
+
+    def set_automatic_completions_after_chars(self, chars):
+        self.automatic_completion_chars = chars
+        if self.data:
+            for finfo in self.data:
+                finfo.editor.set_automatic_completions_after_chars(chars)
+
+    def set_automatic_completions_after_ms(self, ms):
+        self.automatic_completion_ms = ms
+        if self.data:
+            for finfo in self.data:
+                finfo.editor.set_automatic_completions_after_ms(ms)
+
+    def set_completions_hint_enabled(self, state):
+        self.completions_hint_enabled = state
+        if self.data:
+            for finfo in self.data:
+                finfo.editor.toggle_completions_hint(state)
+
+    def set_completions_hint_after_ms(self, ms):
+        self.completions_hint_after_ms = ms
+        if self.data:
+            for finfo in self.data:
+                finfo.editor.set_completions_hint_after_ms(ms)
+
+    def set_hover_hints_enabled(self, state):
+        self.hover_hints_enabled = state
+        if self.data:
+            for finfo in self.data:
+                finfo.editor.toggle_hover_hints(state)
 
     def set_occurrence_highlighting_enabled(self, state):
         # CONF.get(self.CONF_SECTION, 'occurrence_highlighting')
@@ -1118,6 +1328,12 @@ class EditorStack(QWidget):
         if self.data:
             for finfo in self.data:
                 finfo.editor.set_occurrence_timeout(timeout)
+
+    def set_underline_errors_enabled(self, state):
+        self.underline_errors_enabled = state
+        if self.data:
+            for finfo in self.data:
+                finfo.editor.set_underline_errors_enabled(state)
 
     def set_highlight_current_line_enabled(self, state):
         self.highlight_current_line_enabled = state
@@ -1257,7 +1473,7 @@ class EditorStack(QWidget):
         if set_new_index:
             self.set_stack_index(new_index)
         else:
-            # Fixes Issue 1287
+            # Fixes spyder-ide/spyder#1287.
             self.set_current_filename(current_fname)
         if self.outlineexplorer is not None:
             self.outlineexplorer.file_renamed(
@@ -1273,11 +1489,10 @@ class EditorStack(QWidget):
         tab_tip = self.get_tab_tip(fname, is_modified, is_readonly)
 
         # Only update tab text if have changed, otherwise an unwanted scrolling
-        # will happen when changing tabs. See Issue #1170.
+        # will happen when changing tabs. See spyder-ide/spyder#1170.
         if tab_text != self.tabs.tabText(index):
             self.tabs.setTabText(index, tab_text)
         self.tabs.setTabToolTip(index, tab_tip)
-
 
     #------ Context menu
     def __setup_menu(self):
@@ -1291,6 +1506,8 @@ class EditorStack(QWidget):
         add_actions(self.menu, list(actions) + self.__get_split_actions())
         self.close_action.setEnabled(self.is_closable)
 
+        if sys.platform == 'darwin':
+            set_menu_icons(self.menu, True)
 
     #------ Hor/Ver splitting
     def __get_split_actions(self):
@@ -1308,23 +1525,34 @@ class EditorStack(QWidget):
                 triggered=plugin.create_new_window)
 
         # Splitting
-        self.versplit_action = create_action(self, _("Split vertically"),
-                icon=ima.icon('versplit'),
-                tip=_("Split vertically this editor window"),
-                triggered=lambda: self.sig_split_vertically.emit(),
-                shortcut=get_shortcut(context='Editor', name='split vertically'),
-                context=Qt.WidgetShortcut)
-        self.horsplit_action = create_action(self, _("Split horizontally"),
-                icon=ima.icon('horsplit'),
-                tip=_("Split horizontally this editor window"),
-                triggered=lambda: self.sig_split_horizontally.emit(),
-                shortcut=get_shortcut(context='Editor', name='split horizontally'),
-                context=Qt.WidgetShortcut)
-        self.close_action = create_action(self, _("Close this panel"),
-                icon=ima.icon('close_panel'),
-                triggered=self.close_split,
-                shortcut=get_shortcut(context='Editor', name='close split panel'),
-                context=Qt.WidgetShortcut)
+        self.versplit_action = create_action(
+            self,
+            _("Split vertically"),
+            icon=ima.icon('versplit'),
+            tip=_("Split vertically this editor window"),
+            triggered=lambda: self.sig_split_vertically.emit(),
+            shortcut=CONF.get_shortcut(context='Editor',
+                                       name='split vertically'),
+            context=Qt.WidgetShortcut)
+
+        self.horsplit_action = create_action(
+            self,
+            _("Split horizontally"),
+            icon=ima.icon('horsplit'),
+            tip=_("Split horizontally this editor window"),
+            triggered=lambda: self.sig_split_horizontally.emit(),
+            shortcut=CONF.get_shortcut(context='Editor',
+                                       name='split horizontally'),
+            context=Qt.WidgetShortcut)
+
+        self.close_action = create_action(
+            self,
+            _("Close this panel"),
+            icon=ima.icon('close_panel'),
+            triggered=self.close_split,
+            shortcut=CONF.get_shortcut(context='Editor',
+                                       name='close split panel'),
+            context=Qt.WidgetShortcut)
 
         # Regular actions
         actions = [MENU_SEPARATOR, self.versplit_action,
@@ -1339,11 +1567,12 @@ class EditorStack(QWidget):
             actions += [MENU_SEPARATOR, self.new_window_action,
                         close_window_action]
         elif plugin is not None:
-            if plugin.undocked_window is not None:
-                actions += [MENU_SEPARATOR, plugin.dock_action]
+            if plugin._undocked_window is not None:
+                actions += [MENU_SEPARATOR, plugin._dock_action]
             else:
                 actions += [MENU_SEPARATOR, self.new_window_action,
-                            plugin.undock_action, plugin.close_plugin_action]
+                            plugin._undock_action,
+                            plugin._close_plugin_action]
 
         return actions
 
@@ -1485,8 +1714,8 @@ class EditorStack(QWidget):
 
             # We pass self object ID as a QString, because otherwise it would
             # depend on the platform: long for 64bit, int for 32bit. Replacing
-            # by long all the time is not working on some 32bit platforms
-            # (see Issue 1094, Issue 1098)
+            # by long all the time is not working on some 32bit platforms.
+            # See spyder-ide/spyder#1094 and spyder-ide/spyder#1098.
             self.sig_close_file.emit(str(id(self)), filename)
 
             self.opened_files_list_changed.emit()
@@ -1506,9 +1735,8 @@ class EditorStack(QWidget):
 
             self.add_last_closed_file(finfo.filename)
 
-            # Remove autosave on successful close to work around issue #9265.
-            # Probably a good idea in general to mitigate any other bugs.
-            self.autosave.remove_autosave_file(finfo.filename)
+            if finfo.filename in self.autosave.file_hashes:
+                del self.autosave.file_hashes[finfo.filename]
 
         if self.get_stack_count() == 0 and self.create_new_file_if_empty:
             self.sig_new_file[()].emit()
@@ -1524,12 +1752,26 @@ class EditorStack(QWidget):
                 self.tabs.widget(index).language.lower())
         return set(languages)
 
-    def notify_server_ready(self, language, config):
+    def completion_server_ready(self, language):
         """Notify language server availability to code editors."""
         for index in range(self.get_stack_count()):
             editor = self.tabs.widget(index)
             if editor.language.lower() == language:
-                editor.start_lsp_services(config)
+                editor.start_completion_services()
+
+    def update_server_configuration(self, language, config):
+        """Update language server settings across all editors."""
+        for index in range(self.get_stack_count()):
+            editor = self.tabs.widget(index)
+            if editor.language.lower() == language:
+                editor.update_completion_configuration(config)
+
+    def notify_server_down(self, language):
+        """Notify language server unavailability to code editors."""
+        for index in range(self.get_stack_count()):
+            editor = self.tabs.widget(index)
+            if editor.language.lower() == language:
+                editor.stop_completion_services()
 
     def close_all_files(self):
         """Close all opened scripts"""
@@ -1612,7 +1854,7 @@ class EditorStack(QWidget):
             # No file to save
             return True
         if unsaved_nb > 1:
-            buttons |= QMessageBox.YesToAll | QMessageBox.NoToAll
+            buttons |= int(QMessageBox.YesToAll | QMessageBox.NoToAll)
         yes_all = no_all = False
         for index in indexes:
             self.set_stack_index(index)
@@ -1621,7 +1863,7 @@ class EditorStack(QWidget):
                 if not self.save(index):
                     return False
             elif no_all:
-                self.autosave.remove_autosave_file(finfo.filename)
+                self.autosave.remove_autosave_file(finfo)
             elif (finfo.editor.document().isModified() and
                   self.save_dialog_on_tests):
 
@@ -1651,6 +1893,19 @@ class EditorStack(QWidget):
                     return False
         return True
 
+    def compute_hash(self, fileinfo):
+        """Compute hash of contents of editor.
+
+        Args:
+            fileinfo: FileInfo object associated to editor whose hash needs
+                to be computed.
+
+        Returns:
+            int: computed hash.
+        """
+        txt = fileinfo.editor.get_text_with_eol()
+        return hash(txt)
+
     def _write_to_file(self, fileinfo, filename):
         """Low-level function for writing text of editor to file.
 
@@ -1661,10 +1916,10 @@ class EditorStack(QWidget):
         This is a low-level function that only saves the text to file in the
         correct encoding without doing any error handling.
         """
-        txt = to_text_string(fileinfo.editor.get_text_with_eol())
+        txt = fileinfo.editor.get_text_with_eol()
         fileinfo.encoding = encoding.write(txt, filename, fileinfo.encoding)
 
-    def save(self, index=None, force=False):
+    def save(self, index=None, force=False, save_new_files=True):
         """Write text of editor to a file.
 
         Args:
@@ -1693,7 +1948,10 @@ class EditorStack(QWidget):
             return True
         if not osp.isfile(finfo.filename) and not force:
             # File has not been saved yet
-            return self.save_as(index=index)
+            if save_new_files:
+                return self.save_as(index=index)
+            # The file doesn't need to be saved
+            return True
         if self.always_remove_trailing_spaces:
             self.remove_trailing_spaces(index)
         if self.convert_eol_on_save:
@@ -1704,6 +1962,8 @@ class EditorStack(QWidget):
             self.set_os_eol_chars(osname=osname)
         try:
             self._write_to_file(finfo, finfo.filename)
+            file_hash = self.compute_hash(finfo)
+            self.autosave.file_hashes[finfo.filename] = file_hash
             self.autosave.remove_autosave_file(finfo.filename)
             finfo.newly_created = False
             self.encoding_changed.emit(finfo.encoding)
@@ -1711,25 +1971,18 @@ class EditorStack(QWidget):
 
             # We pass self object ID as a QString, because otherwise it would
             # depend on the platform: long for 64bit, int for 32bit. Replacing
-            # by long all the time is not working on some 32bit platforms
-            # (see Issue 1094, Issue 1098)
+            # by long all the time is not working on some 32bit platforms.
+            # See spyder-ide/spyder#1094 and spyder-ide/spyder#1098.
             # The filename is passed instead of an index in case the tabs
-            # have been rearranged (see issue 5703).
+            # have been rearranged. See spyder-ide/spyder#5703.
             self.file_saved.emit(str(id(self)),
                                  finfo.filename, finfo.filename)
 
             finfo.editor.document().setModified(False)
-            finfo.editor.document().changed_since_autosave = False
             self.modification_changed(index=index)
             self.analyze_script(index)
 
-            #XXX CodeEditor-only: re-scan the whole text to rebuild outline
-            # explorer data from scratch (could be optimized because
-            # rehighlighting text means searching for all syntax coloring
-            # patterns instead of only searching for class/def patterns which
-            # would be sufficient for outline explorer data.
-            finfo.editor.rehighlight()
-
+            # Rebuild the outline explorer data
             self._refresh_outlineexplorer(index)
 
             finfo.editor.notify_save()
@@ -1753,7 +2006,7 @@ class EditorStack(QWidget):
 
         The original filename is passed instead of an index in case the tabs
         on the editor stacks were moved and are now in a different order - see
-        issue 5703.
+        spyder-ide/spyder#5703.
         Filename is passed in case file was just saved as another name.
         """
         index = self.has_filename(original_filename)
@@ -1782,7 +2035,7 @@ class EditorStack(QWidget):
 
         # Don't use filters on KDE to not make the dialog incredible
         # slow
-        # Fixes issue 4156
+        # Fixes spyder-ide/spyder#4156.
         if is_kde_desktop() and not is_anaconda():
             filters = ''
             selectedfilter = ''
@@ -1826,9 +2079,10 @@ class EditorStack(QWidget):
             # Save the currently edited file
             index = self.get_stack_index()
         finfo = self.data[index]
+        original_newly_created = finfo.newly_created
         # The next line is necessary to avoid checking if the file exists
         # While running __check_file_status
-        # See issues 3678 and 3026
+        # See spyder-ide/spyder#3678 and spyder-ide/spyder#3026.
         finfo.newly_created = True
         original_filename = finfo.filename
         filename = self.select_savename(original_filename)
@@ -1847,7 +2101,7 @@ class EditorStack(QWidget):
             # We pass self object ID as a QString, because otherwise it would
             # depend on the platform: long for 64bit, int for 32bit. Replacing
             # by long all the time is not working on some 32bit platforms
-            # (see Issue 1094, Issue 1098)
+            # See spyder-ide/spyder#1094 and spyder-ide/spyder#1098.
             self.file_renamed_in_data.emit(str(id(self)),
                                            original_filename, filename)
 
@@ -1856,6 +2110,7 @@ class EditorStack(QWidget):
             self.set_stack_index(new_index)
             return ok
         else:
+            finfo.newly_created = original_newly_created
             return False
 
     def save_copy_as(self, index=None):
@@ -1909,14 +2164,14 @@ class EditorStack(QWidget):
         else:
             return False
 
-    def save_all(self):
+    def save_all(self, save_new_files=True):
         """Save all opened files.
 
         Iterate through self.data and call save() on any modified files.
         """
         for index in range(self.get_stack_count()):
             if self.data[index].editor.document().isModified():
-                self.save(index)
+                self.save(index, save_new_files=save_new_files)
 
     #------ Update UI
     def start_stop_analysis_timer(self):
@@ -1954,7 +2209,7 @@ class EditorStack(QWidget):
 #            btn.setEnabled(count > 1)
 
         editor = self.get_current_editor()
-        if editor.lsp_ready and not editor.document_opened:
+        if editor.completions_available and not editor.document_opened:
             editor.document_did_open()
         if index != -1:
             editor.setFocus()
@@ -1968,7 +2223,7 @@ class EditorStack(QWidget):
 
         # Needed to avoid an error generated after moving/renaming
         # files outside Spyder while in debug mode.
-        # See issue 8749.
+        # See spyder-ide/spyder#8749.
         try:
             logger.debug("Current changed: %d - %s" %
                          (index, self.data[index].editor.filename))
@@ -1976,9 +2231,13 @@ class EditorStack(QWidget):
             pass
 
         self.update_plugin_title.emit()
+        # Make sure that any replace happens in the editor on top
+        # See spyder-ide/spyder#9688.
+        self.find_widget.set_editor(editor, refresh=False)
+
         if editor is not None:
             # Needed in order to handle the close of files open in a directory
-            # that has been renamed. See issue 5157
+            # that has been renamed. See spyder-ide/spyder#5157.
             try:
                 self.current_file_changed.emit(self.data[index].filename,
                                                editor.get_position('cursor'))
@@ -2037,7 +2296,7 @@ class EditorStack(QWidget):
                 # currently focused one in the editor stack. Therefore,
                 # we need to force a refresh of the outline explorer to set
                 # the current editor to the currently focused one in the
-                # editor stack. See PR #8015.
+                # editor stack. See spyder-ide/spyder#8015.
                 self._refresh_outlineexplorer(update=False)
                 return
         self._sync_outlineexplorer_file_order()
@@ -2204,7 +2463,7 @@ class EditorStack(QWidget):
         position = finfo.editor.get_position('cursor')
         finfo.editor.set_text(txt)
         finfo.editor.document().setModified(False)
-        finfo.editor.document().changed_since_autosave = False
+        self.autosave.file_hashes[finfo.filename] = hash(txt)
         finfo.editor.set_cursor_position(position)
 
         #XXX CodeEditor-only: re-scan the whole text to rebuild outline
@@ -2249,7 +2508,7 @@ class EditorStack(QWidget):
         finfo = FileInfo(fname, enc, editor, new, self.threadmanager)
 
         self.add_to_data(finfo, set_current, add_where)
-        finfo.send_to_help.connect(self.send_to_help)
+        finfo.sig_send_to_help.connect(self.send_to_help)
         finfo.sig_show_object_info.connect(self.inspect_current_object)
         finfo.todo_results_changed.connect(
             lambda: self.todo_results_changed.emit())
@@ -2259,6 +2518,7 @@ class EditorStack(QWidget):
                                          self.sig_save_bookmarks.emit(s1, s2))
         editor.sig_run_selection.connect(self.run_selection)
         editor.sig_run_cell.connect(self.run_cell)
+        editor.sig_debug_cell.connect(self.debug_cell)
         editor.sig_run_cell_and_advance.connect(self.run_cell_and_advance)
         editor.sig_re_run_last_cell.connect(self.re_run_last_cell)
         editor.sig_new_file.connect(self.sig_new_file.emit)
@@ -2269,13 +2529,22 @@ class EditorStack(QWidget):
         editor.setup_editor(
             linenumbers=self.linenumbers_enabled,
             show_blanks=self.blanks_enabled,
+            underline_errors=self.underline_errors_enabled,
             scroll_past_end=self.scrollpastend_enabled,
             edge_line=self.edgeline_enabled,
             edge_line_columns=self.edgeline_columns, language=language,
             markers=self.has_markers(), font=self.default_font,
             color_scheme=self.color_scheme,
             wrap=self.wrap_enabled, tab_mode=self.tabmode_enabled,
+            strip_mode=self.stripmode_enabled,
             intelligent_backspace=self.intelligent_backspace_enabled,
+            automatic_completions=self.automatic_completions_enabled,
+            automatic_completions_after_chars=self.automatic_completion_chars,
+            automatic_completions_after_ms=self.automatic_completion_ms,
+            code_snippets=self.code_snippets_enabled,
+            completions_hint=self.completions_hint_enabled,
+            completions_hint_after_ms=self.completions_hint_after_ms,
+            hover_hints=self.hover_hints_enabled,
             highlight_current_line=self.highlight_current_line_enabled,
             highlight_current_cell=self.highlight_current_cell_enabled,
             occurrence_highlighting=self.occurrence_highlighting_enabled,
@@ -2294,16 +2563,18 @@ class EditorStack(QWidget):
         if cloned_from is None:
             editor.set_text(txt)
             editor.document().setModified(False)
-            editor.document().changed_since_autosave = False
         finfo.text_changed_at.connect(
             lambda fname, position:
             self.text_changed_at.emit(fname, position))
         editor.sig_cursor_position_changed.connect(
                                            self.editor_cursor_position_changed)
         editor.textChanged.connect(self.start_stop_analysis_timer)
-        editor.sig_perform_lsp_request.connect(
-            lambda lang, method, params: self.perform_lsp_request.emit(
-                lang, method, params))
+
+        def perform_completion_request(lang, method, params):
+            self.sig_perform_completion_request.emit(lang, method, params)
+
+        editor.sig_perform_completion_request.connect(
+            perform_completion_request)
         editor.modificationChanged.connect(
             lambda state: self.modification_changed(state,
                 editor_id=id(editor)))
@@ -2337,6 +2608,7 @@ class EditorStack(QWidget):
         """Cursor position of one of the editor in the stack has changed"""
         self.sig_editor_cursor_position_changed.emit(line, index)
 
+    @Slot(str, str, bool)
     def send_to_help(self, name, signature, force=False):
         """qstr1: obj_text, qstr2: argpspec, qstr3: note, qstr4: doc_text"""
         if not force and not self.help_enabled:
@@ -2374,21 +2646,28 @@ class EditorStack(QWidget):
             finfo.editor.document().setModified(False)
         return finfo
 
-    def load(self, filename, set_current=True, add_where='end'):
+    def load(self, filename, set_current=True, add_where='end',
+             processevents=True):
         """
         Load filename, create an editor instance and return it
+
+        This also sets the hash of the loaded file in the autosave component.
+
         *Warning* This is loading file, creating editor but not executing
         the source code analysis -- the analysis must be done by the editor
         plugin (in case multiple editorstack instances are handled)
         """
         filename = osp.abspath(to_text_string(filename))
-        self.starting_long_process.emit(_("Loading %s...") % filename)
+        if processevents:
+            self.starting_long_process.emit(_("Loading %s...") % filename)
         text, enc = encoding.read(filename)
+        self.autosave.file_hashes[filename] = hash(text)
         finfo = self.create_new_editor(filename, enc, text, set_current,
                                        add_where=add_where)
         index = self.data.index(finfo)
         self._refresh_outlineexplorer(index, update=True)
-        self.ending_long_process.emit("")
+        if processevents:
+            self.ending_long_process.emit("")
         if self.isVisible() and self.checkeolchars_enabled \
            and sourcecode.has_mixed_eol_chars(text):
             name = osp.basename(filename)
@@ -2464,10 +2743,19 @@ class EditorStack(QWidget):
             editor.append(editor.get_line_separator())
         editor.move_cursor_to_next('line', 'down')
 
-    def run_cell(self):
+    def run_cell(self, debug=False):
         """Run current cell."""
-        text, line = self.get_current_editor().get_cell_as_executable_code()
-        self._run_cell_text(text, line)
+        text, block = self.get_current_editor().get_cell_as_executable_code()
+        finfo = self.get_current_finfo()
+        editor = self.get_current_editor()
+        name = cell_name(block)
+        filename = finfo.filename
+
+        self._run_cell_text(text, editor, (filename, name), debug)
+
+    def debug_cell(self):
+        """Debug current cell."""
+        self.run_cell(debug=True)
 
     def run_cell_and_advance(self):
         """Run current cell and advance to the next one"""
@@ -2496,11 +2784,23 @@ class EditorStack(QWidget):
 
     def re_run_last_cell(self):
         """Run the previous cell again."""
-        text, line = (self.get_current_editor()
-                      .get_last_cell_as_executable_code())
-        self._run_cell_text(text, line)
+        if self.last_cell_call is None:
+            return
+        filename, cell_name = self.last_cell_call
+        index = self.has_filename(filename)
+        if index is None:
+            return
+        editor = self.data[index].editor
 
-    def _run_cell_text(self, text, line):
+        try:
+            text = editor.get_cell_code(cell_name)
+        except RuntimeError:
+            return
+
+        self._run_cell_text(text, editor, (filename, cell_name))
+
+
+    def _run_cell_text(self, text, editor, cell_id, debug=False):
         """Run cell code in the console.
 
         Cell code is run in the console by copying it to the console if
@@ -2514,17 +2814,13 @@ class EditorStack(QWidget):
         line : int
             The starting line number of the cell in the file.
         """
-        finfo = self.get_current_finfo()
-        editor = self.get_current_editor()
-        oe_data = editor.highlighter.get_outlineexplorer_data()
-        try:
-            cell_name = oe_data.get(line-1).def_name
-        except AttributeError:
-            cell_name = ''
-        if finfo.editor.is_python() and text:
-            self.run_cell_in_ipyclient.emit(text, cell_name,
-                                            finfo.filename,
-                                            self.run_cell_copy)
+        (filename, cell_name) = cell_id
+        if editor.is_python():
+            args = (text, cell_name, filename, self.run_cell_copy)
+            if debug:
+                self.debug_cell_in_ipyclient.emit(*args)
+            else:
+                self.run_cell_in_ipyclient.emit(*args)
         editor.setFocus()
 
     #------ Drag and drop
@@ -2536,7 +2832,7 @@ class EditorStack(QWidget):
         # can return True but source.urls() is []
         # The third check is needed since a file could be dropped from
         # compressed files. In Windows mimedata2url(source) returns None
-        # Fixes issue 5218
+        # Fixes spyder-ide/spyder#5218.
         if source.hasUrls() and source.urls() and mimedata2url(source):
             all_urls = mimedata2url(source)
             text = [encoding.is_text_file(url) for url in all_urls]
@@ -2550,7 +2846,7 @@ class EditorStack(QWidget):
             # This covers cases like dragging from compressed files,
             # which can be opened by the Editor if they are plain
             # text, but doesn't come with url info.
-            # Fixes Issue 2032
+            # Fixes spyder-ide/spyder#2032.
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -2561,7 +2857,7 @@ class EditorStack(QWidget):
         source = event.mimeData()
         # The second check is necessary when mimedata2url(source)
         # returns None.
-        # Fixes issue 7742
+        # Fixes spyder-ide/spyder#7742.
         if source.hasUrls() and mimedata2url(source):
             files = mimedata2url(source)
             files = [f for f in files if encoding.is_text_file(f)]
@@ -2599,6 +2895,7 @@ class EditorSplitter(QSplitter):
                         Defaults to plugin.unregister_editorstack() to
                         unregister the EditorStack with the Editor plugin.
         """
+
         QSplitter.__init__(self, parent)
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setChildrenCollapsible(False)
@@ -2647,7 +2944,7 @@ class EditorSplitter(QSplitter):
             self.unregister_editorstack_cb(self.editorstack)
             self.editorstack = None
             close_splitter = self.count() == 1
-        except RuntimeError:
+        except (RuntimeError, AttributeError):
             # editorsplitter has been destroyed (happens when closing a
             # EditorMainWindow instance)
             return
@@ -2783,9 +3080,9 @@ class EditorSplitter(QSplitter):
                 editor = finfo.editor
                 # TODO: go_to_line is not working properly (the line it jumps
                 # to is not the corresponding to that file). This will be fixed
-                # in a future PR (which will fix issue #3857)
+                # in a future PR (which will fix spyder-ide/spyder#3857).
                 if dont_goto is not None:
-                    # skip go to line for first file because is already there
+                    # Skip go to line for first file because is already there.
                     pass
                 else:
                     try:
@@ -2805,9 +3102,7 @@ class EditorSplitter(QSplitter):
 
 
 class EditorWidget(QSplitter):
-    def __init__(self, parent, plugin, menu_actions, show_fullpath,
-                 show_all_files, group_cells, show_comments,
-                 sort_files_alphabetically):
+    def __init__(self, parent, plugin, menu_actions, outline_explorer_options):
         QSplitter.__init__(self, parent)
         self.setAttribute(Qt.WA_DeleteOnClose)
 
@@ -2826,12 +3121,14 @@ class EditorWidget(QSplitter):
         self.plugin.register_widget_shortcuts(self.find_widget)
         self.find_widget.hide()
         self.outlineexplorer = OutlineExplorerWidget(
-                self,
-                show_fullpath=show_fullpath,
-                show_all_files=show_all_files,
-                group_cells=group_cells,
-                show_comments=show_comments,
-                sort_files_alphabetically=sort_files_alphabetically)
+            self,
+            show_fullpath=outline_explorer_options['show_fullpath'],
+            show_all_files=outline_explorer_options['show_all_files'],
+            group_cells=outline_explorer_options['group_cells'],
+            show_comments=outline_explorer_options['show_comments'],
+            sort_files_alphabetically=outline_explorer_options[
+                'sort_files_alphabetically'],
+            )
         self.outlineexplorer.edit_goto.connect(
                      lambda filenames, goto, word:
                      plugin.load(filenames=filenames, goto=goto, word=word,
@@ -2896,8 +3193,7 @@ class EditorWidget(QSplitter):
 
 class EditorMainWindow(QMainWindow):
     def __init__(self, plugin, menu_actions, toolbar_list, menu_list,
-                 show_fullpath, show_all_files, group_cells, show_comments,
-                 sort_files_alphabetically):
+                 outline_explorer_options):
         QMainWindow.__init__(self)
         self.setAttribute(Qt.WA_DeleteOnClose)
 
@@ -2905,9 +3201,7 @@ class EditorMainWindow(QMainWindow):
         self.window_size = None
 
         self.editorwidget = EditorWidget(self, plugin, menu_actions,
-                                         show_fullpath, show_all_files,
-                                         group_cells, show_comments,
-                                         sort_files_alphabetically)
+                                         outline_explorer_options)
         self.setCentralWidget(self.editorwidget)
 
         # Setting interface theme
@@ -2983,13 +3277,13 @@ class EditorMainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Reimplement Qt method"""
-        if self.plugin.undocked_window is not None:
+        if self.plugin._undocked_window is not None:
             self.plugin.dockwidget.setWidget(self.plugin)
             self.plugin.dockwidget.setVisible(True)
         self.plugin.switch_to_plugin()
         QMainWindow.closeEvent(self, event)
-        if self.plugin.undocked_window is not None:
-            self.plugin.undocked_window = None
+        if self.plugin._undocked_window is not None:
+            self.plugin._undocked_window = None
 
     def get_layout_settings(self):
         """Return layout state"""
@@ -3027,10 +3321,10 @@ class EditorPluginExample(QSplitter):
     def __init__(self):
         QSplitter.__init__(self)
 
-        self.dock_action = None
-        self.undock_action = None
-        self.close_plugin_action = None
-        self.undocked_window = None
+        self._dock_action = None
+        self._undock_action = None
+        self._close_plugin_action = None
+        self._undocked_window = None
         menu_actions = []
 
         self.editorstacks = []
@@ -3190,7 +3484,8 @@ def test():
     t0 = time.time()
     test.load(osp.join(spyder_dir, "plugins", "editor", "widgets",
                        "editor.py"))
-    test.load(osp.join(spyder_dir, "plugins", "explorer", "widgets.py"))
+    test.load(osp.join(spyder_dir, "plugins", "explorer", "widgets",
+                       'explorer.py'))
     test.load(osp.join(spyder_dir, "plugins", "variableexplorer", "widgets",
                        "collectionseditor.py"))
     test.load(osp.join(spyder_dir, "plugins", "editor", "widgets",

@@ -6,6 +6,9 @@
 
 """
 Configuration file for Pytest
+
+NOTE: DO NOT add fixtures here. It could generate problems with
+      QtAwesome being called before a QApplication is created.
 """
 
 import os
@@ -17,13 +20,6 @@ import shutil
 os.environ['SPYDER_PYTEST'] = 'True'
 
 import pytest
-
-# Local imports
-from spyder.tests.fixtures.file_fixtures import create_folders_files
-from spyder.tests.fixtures.bookmark_fixtures import (code_editor_bot,
-                                                     setup_editor)
-from spyder.plugins.editor.lsp.tests.fixtures import lsp_manager, qtbot_module
-from spyder.plugins.editor.widgets.tests.fixtures import lsp_codeeditor
 
 # Remove temp conf_dir before starting the tests
 from spyder.config.base import get_conf_path
@@ -39,12 +35,18 @@ def pytest_addoption(parser):
 
 
 def pytest_collection_modifyitems(config, items):
-    """Skip tests with the slow marker"""
-    if config.getoption("--run-slow"):
-        # --run-slow given in cli: do not skip slow tests
-        return
+    """
+    Decide what tests to run (slow or fast) according to the --run-slow
+    option.
+    """
+    slow_option = config.getoption("--run-slow")
+    skip_slow = pytest.mark.skip(reason="Need --run-slow option to run")
+    skip_fast = pytest.mark.skip(reason="Don't need --run-slow option to run")
 
-    skip_slow = pytest.mark.skip(reason="need --run-slow option to run")
     for item in items:
-        if "slow" in item.keywords:
-            item.add_marker(skip_slow)
+        if slow_option:
+            if "slow" not in item.keywords:
+                item.add_marker(skip_fast)
+        else:
+            if "slow" in item.keywords:
+                item.add_marker(skip_slow)

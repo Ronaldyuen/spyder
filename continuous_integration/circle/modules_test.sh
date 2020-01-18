@@ -46,6 +46,9 @@ for f in spyder/*/*.py; do
     if [[ $f == spyder/widgets/browser.py ]]; then
         continue
     fi
+    if [[ $f == spyder/widgets/switcher.py ]]; then
+        continue
+    fi
     python "$f"
     if [ $? -ne 0 ]; then
         exit 1
@@ -64,10 +67,13 @@ for f in spyder/*/*/*.py; do
     if [[ $f == spyder/plugins/*/plugin.py ]]; then
         continue
     fi
+    if [[ $f == spyder/plugins/completion/*.py ]]; then
+        continue
+    fi
     if [[ $f == spyder/plugins/*/__init__.py ]]; then
         continue
     fi
-    if [[ $f == spyder/utils/introspection/fallback_plugin.py ]]; then
+    if [[ $f == spyder/utils/introspection/old_fallback.py ]]; then
         continue
     fi
     python "$f"
@@ -82,7 +88,7 @@ for f in spyder/*/*/*/*.py; do
     if [[ $f == *test*/*.* ]]; then
         continue
     fi
-    if [[ $f == spyder/plugins/editor/lsp/*.py ]]; then
+    if [[ $f == spyder/plugins/completion/*/*.py ]]; then
         continue
     fi
     if [[ $f == spyder/plugins/help/utils/*.py ]]; then
@@ -97,6 +103,9 @@ for f in spyder/*/*/*/*.py; do
     if [[ $f == spyder/plugins/editor/panels/__init__.py ]]; then
         continue
     fi
+    if [[ $f == spyder/utils/external/pybloom_pyqt/*.py ]]; then
+        continue
+    fi
     python "$f"
     if [ $? -ne 0 ]; then
         exit 1
@@ -109,7 +118,10 @@ for f in spyder/*/*/*/*/*.py; do
     if [[ $f == *test*/*.* ]]; then
         continue
     fi
-    if [[ $f == spyder/plugins/editor/lsp/*/*.py ]]; then
+    if [[ $f == spyder/plugins/completion/*/*/*.py ]]; then
+        continue
+    fi
+    if [[ $f == spyder/plugins/variableexplorer/widgets/objectexplorer/__init__.py ]]; then
         continue
     fi
     python "$f"
