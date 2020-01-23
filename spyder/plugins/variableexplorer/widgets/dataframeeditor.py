@@ -412,7 +412,9 @@ class DataFrameModel(QAbstractTableModel):
         given level.
         """
         ax = self._axis(axis)
-        return ax.tolist()[x] if not hasattr(ax, 'levels') \
+        # slow if using tolist on DatetimeIndex
+        values = ax.values[x] if isinstance(ax, pd.DatetimeIndex) else ax.tolist()[x]
+        return values if not hasattr(ax, 'levels') \
             else ax.values[x][level]
 
     def name(self, axis, level):
@@ -1988,7 +1990,7 @@ def test():
     df1['super_super_super_unacceptable_long_column_name_that_should_not_happen'] = df1['Test']
     df1.set_index('date_time', inplace=True)
 
-    _test_wrapper(_test_edit, df1, is_profiling=False)
+    _test_wrapper(_test_edit, df1, is_profiling=True)
     # from pandas import MultiIndex
     # import numpy
     #
