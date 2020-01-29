@@ -892,6 +892,7 @@ class DataFrameView(QTableView):
     sig_fetch_more_rows = Signal()
     sig_reset_and_scroll_to = Signal()
     sig_reset_sort_indicator = Signal()
+    sig_top_left_label_update = Signal()
 
     def __init__(self, parent, model, header, hscroll, vscroll):
         """Constructor."""
@@ -917,6 +918,7 @@ class DataFrameView(QTableView):
             lambda val: self.load_more_data(val, columns=True))
         self.verticalScrollBar().valueChanged.connect(
             lambda val: self.load_more_data(val, rows=True))
+        self.selectionModel().selectionChanged.connect(self.selection_changed)
 
     def load_more_data(self, value, rows=False, columns=False):
         """Load more rows and columns to display."""
@@ -1069,6 +1071,12 @@ class DataFrameView(QTableView):
         output.close()
         clipboard = QApplication.clipboard()
         clipboard.setText(contents)
+
+    def selection_changed(self):
+        self.sig_top_left_label_update.emit()
+
+    def get_selected_rows(self):
+        return set([x.row() for x in self.selectedIndexes()])
 
 
 class DataFrameHeaderModel(QAbstractTableModel):
@@ -1535,6 +1543,7 @@ class DataFrameEditor(QDialog):
         self.dataTable.sig_fetch_more_rows.connect(self._fetch_more_rows)
         self.dataTable.sig_reset_and_scroll_to.connect(self.reset_and_scroll_to)
         self.dataTable.sig_reset_sort_indicator.connect(self._reset_sort_indicator)
+        self.dataTable.sig_top_left_label_update.connect(self._top_left_label_update)
 
     def sortByIndex(self, index):
         """Implement a Index sort."""
@@ -1648,7 +1657,7 @@ class DataFrameEditor(QDialog):
         # setting the custom header
         if self._model.shape[1] > 0:
             self.custom_header_view.setFilterBoxes(self._model.shape[1])
-            self.custom_label_view.setQLabel(str(self._model.shape[0]))
+            self.set_top_left_label()
         # set signal once only
         if self.custom_header_view.receivers(self.custom_header_view.filterActivated) == 0:
             self.custom_header_view.filterActivated.connect(self.handleFilterActivated)
@@ -1656,6 +1665,20 @@ class DataFrameEditor(QDialog):
         # Needs to be called after setting all table models
         if relayout:
             self._update_layout()
+
+    def _top_left_label_update(self):
+        """ shows row number if single row selected """
+        rows_selected = self.dataTable.get_selected_rows()
+        if len(rows_selected) == 1:
+            row_selected = next(iter(rows_selected))
+            self.set_top_left_label(f"{int(row_selected) + 1}/{self._model.shape[0]}")
+        else:
+            self.set_top_left_label()
+
+    def set_top_left_label(self, text=None):
+        if text is None:
+            text = str(self._model.shape[0])
+        self.custom_label_view.setQLabel(text)
 
     def setCurrentIndex(self, y, x):
         """Set current selection."""
@@ -1898,7 +1921,7 @@ class DataFrameEditor(QDialog):
         self.handleFilterActivated()
 
     def reset_and_scroll_to(self):
-        selected_row_list = set([x.row() for x in self.dataTable.selectedIndexes()])
+        selected_row_list = self.dataTable.get_selected_rows()
         if len(selected_row_list) > 1:
             QMessageBox.critical(self, "Error", "Only one row should be selected.")
             return
@@ -1988,7 +2011,7 @@ def test():
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
     df1 = df1.join([DataFrame([{'F': [1, 2, 3, 4]}])])
     df1['super_super_super_unacceptable_long_column_name_that_should_not_happen'] = df1['Test']
-    df1.set_index('date_time', inplace=True)
+    # df1.set_index('date_time', inplace=True)
 
     _test_wrapper(_test_edit, df1, is_profiling=True)
     # from pandas import MultiIndex
