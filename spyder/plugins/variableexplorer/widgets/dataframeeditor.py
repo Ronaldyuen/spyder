@@ -436,7 +436,7 @@ class DataFrameModel(QAbstractTableModel):
                     # TODO maybe check unique size first?
                     unique_items = self.df[col].unique().tolist()
                     unique_items = sorted(unique_items)
-                except (TypeError, AssertionError):
+                except (TypeError, AttributeError):
                     # unhashable values OR mixed data type could not be sorted
                     pass
                 self.unique_items_col[idx] = unique_items
