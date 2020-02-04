@@ -548,7 +548,7 @@ class DataFrameModel(QAbstractTableModel):
         Each statement should START with either the logical operators: > < !=  ==
         OR the following definitions:
         ^ : replace by .str.startswith
-        ISNAN: replace by .np.isnan()
+        ISNAN: replace by pd.isnull
 
         If none of above is detected, will use == by default
 
@@ -561,6 +561,8 @@ class DataFrameModel(QAbstractTableModel):
                 pass
             elif logic_str.startswith("^"):
                 logic_str = ".str.startswith({})".format(logic_str[1:])
+            elif logic_str.startswith("+"):
+                logic_str = ".str.contains({})".format(logic_str[1:])
             elif logic_str == "ISNAN":
                 return '(pd.isnull(self.original_df["{}"]))'.format(column_name)
             elif logic_str == "!ISNAN":
