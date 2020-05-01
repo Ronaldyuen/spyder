@@ -58,7 +58,7 @@ from spyder.plugins.variableexplorer.widgets.collectionsdelegate import (
     CollectionsDelegate)
 from spyder.plugins.variableexplorer.widgets.importwizard import ImportWizard
 from spyder.widgets.helperwidgets import CustomSortFilterProxy
-
+from spyder.plugins.variableexplorer.widgets.basedialog import BaseDialog
 
 # Maximum length of a serialized variable to be set in the kernel
 MAX_SERIALIZED_LENGHT = 1e6
@@ -496,6 +496,8 @@ class BaseTableView(QTableView):
     sig_files_dropped = Signal(list)
     redirect_stdio = Signal(bool)
     sig_free_memory = Signal()
+    sig_open_editor = Signal()
+    sig_editor_shown = Signal()
 
     def __init__(self, parent):
         QTableView.__init__(self, parent)
@@ -742,6 +744,7 @@ class BaseTableView(QTableView):
         """Set table data"""
         if data is not None:
             self.source_model.set_data(data, self.dictfilter)
+            self.source_model.reset()
             self.sortByColumn(0, Qt.AscendingOrder)
 
     def mousePressEvent(self, event):
@@ -1139,7 +1142,7 @@ class CollectionsEditorTableView(BaseTableView):
         data = self.source_model.get_data()
         for key in sorted(keys, reverse=True):
             data.pop(key)
-            self.set_data(data)
+        self.set_data(data)
 
     def copy_value(self, orig_key, new_key):
         """Copy value"""
@@ -1268,7 +1271,7 @@ class CollectionsEditorWidget(QWidget):
         return self.editor.source_model.title
 
 
-class CollectionsEditor(QDialog):
+class CollectionsEditor(BaseDialog):
     """Collections Editor Dialog"""
     def __init__(self, parent=None):
         QDialog.__init__(self, parent)
@@ -1284,7 +1287,7 @@ class CollectionsEditor(QDialog):
         self.btn_save_and_close = None
         self.btn_close = None
 
-    def setup(self, data, title='', readonly=False, width=650, remote=False,
+    def setup(self, data, title='', readonly=False, remote=False,
               icon=None, parent=None):
         """Setup editor."""
         if isinstance(data, (dict, set)):
@@ -1338,12 +1341,6 @@ class CollectionsEditor(QDialog):
         btn_layout.addWidget(self.btn_close)
 
         layout.addLayout(btn_layout)
-
-        constant = 121
-        row_height = 30
-        error_margin = 10
-        height = constant + row_height * min([10, datalen]) + error_margin
-        self.resize(width, height)
 
         self.setWindowTitle(self.widget.get_title())
         if icon is None:
@@ -1428,6 +1425,8 @@ class RemoteCollectionsEditorTableView(BaseTableView):
 
         self.delegate = RemoteCollectionsDelegate(self)
         self.delegate.sig_free_memory.connect(self.sig_free_memory.emit)
+        self.delegate.sig_open_editor.connect(self.sig_open_editor.emit)
+        self.delegate.sig_editor_shown.connect(self.sig_editor_shown.emit)
         self.setItemDelegate(self.delegate)
 
         self.setup_table()

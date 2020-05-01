@@ -1,20 +1,34 @@
 # Minor release to list
 
-**Subject**: [ANN] Spyder 4.0.1 is released!
+**Subject**: [ANN] Spyder 4.1.2 is released!
 
 
 Hi all,
 
 On the behalf of the [Spyder Project Contributors](https://github.com/spyder-ide/spyder/graphs/contributors),
-I'm pleased to announce that Spyder **4.0.1** has been released and is available for
+I'm pleased to announce that Spyder **4.1.2** has been released and is available for
 Windows, GNU/Linux and MacOS X: https://github.com/spyder-ide/spyder/releases
 
-This release comes almost one month after version 4.0.0 and it doesn't add new
-features. However, it has important performance improvements and also fixes
-several regressions over Spyder 3 detected after releasing version 4.
+This release comes two weeks after version 4.1.1 and it contains the
+following new features and important fixes:
 
-In this release we fixed 32 issues and merged 43 pull requests that amount
-to more than 170 commits. For a full list of fixes, please see our
+- New features
+  * Add a new entry to the status bar to show the current state of Python
+    language server. This will allow users to know if completions, linting and
+    folding are working as expected or have issues. Clicking on this entry will
+    also show a menu from which is possible to restart the server manually.
+
+- Important fixes
+  * Completely disable warning informing to restart Spyder when a screen
+    resolution is detected on macOS.
+  * Show an error message when it's not possible to create a special console
+    for Sympy, Cython or Pylab.
+  * Restore code folding for all files with less than 2000 lines.
+  * Fix showing help for dot object (e.g. `np.sin`) in the IPython console.
+  * Fix showing kernel initialization error messages on Windows.
+
+In this release we fixed 16 issues and merged 23 pull requests that amount
+to more than 120 commits. For a full list of fixes, please see our
 [Changelog](https://github.com/spyder-ide/spyder/blob/4.x/CHANGELOG.md).
 
 Don't forget to follow Spyder updates/news on the project's

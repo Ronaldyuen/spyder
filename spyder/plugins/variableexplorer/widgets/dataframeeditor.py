@@ -104,6 +104,7 @@ from spyder.utils import icon_manager as ima
 from spyder.utils.qthelpers import (add_actions, create_action,
                                     keybinding, qapplication)
 from spyder.plugins.variableexplorer.widgets.arrayeditor import get_idx_rect
+from spyder.plugins.variableexplorer.widgets.basedialog import BaseDialog
 
 # Supported Numbers and complex numbers
 REAL_NUMBER_TYPES = (float, int, np.int64, np.int32, np.int16, np.float32, np.float64)
@@ -917,10 +918,27 @@ class DataFrameView(QTableView):
             name='copy',
             parent=self)
         self.horizontalScrollBar().valueChanged.connect(
-            lambda val: self.load_more_data(val, columns=True))
-        self.verticalScrollBar().valueChanged.connect(
-            lambda val: self.load_more_data(val, rows=True))
+            self._load_more_columns)
+        self.verticalScrollBar().valueChanged.connect(self._load_more_rows)
         self.selectionModel().selectionChanged.connect(self.selection_changed)
+
+    def _load_more_columns(self, value):
+        """Load more columns to display."""
+        # Needed to avoid a NameError while fetching data when closing
+        # See spyder-ide/spyder#12034.
+        try:
+            self.load_more_data(value, columns=True)
+        except NameError:
+            pass
+
+    def _load_more_rows(self, value):
+        """Load more rows to display."""
+        # Needed to avoid a NameError while fetching data when closing
+        # See spyder-ide/spyder#12034.
+        try:
+            self.load_more_data(value, rows=True)
+        except NameError:
+            pass
 
     def load_more_data(self, value, rows=False, columns=False):
         """Load more rows and columns to display."""
@@ -1029,7 +1047,8 @@ class DataFrameView(QTableView):
         types_in_menu = [copy_action]
         types_in_menu += [reset_action]
         for name, func in functions:
-            slot = lambda func=func: self.change_type(func)
+            def slot():
+                self.change_type(func)
             types_in_menu += [create_action(self, name,
                                             triggered=slot,
                                             context=Qt.WidgetShortcut)]
@@ -1113,6 +1132,13 @@ class DataFrameHeaderModel(QAbstractTableModel):
             self.total_rows = self.model.total_rows
             self._shape = (self.model.shape[0], self.model.header_shape[1])
             self.rows_loaded = self.model.rows_loaded
+
+        if self.axis == 0:
+            self.total_cols = self.model.shape[1]
+            self._shape = (self.model.header_shape[0], self.model.shape[1])
+        else:
+            self.total_rows = self.model.shape[0]
+            self._shape = (self.model.shape[0], self.model.header_shape[1])
 
     def rowCount(self, index=None):
         """Get number of rows in the header."""
@@ -1290,7 +1316,7 @@ class DataFrameLevelModel(QAbstractTableModel):
         return None
 
 
-class DataFrameEditor(QDialog):
+class DataFrameEditor(BaseDialog):
     """
     Dialog for displaying and editing DataFrame and related objects.
 
@@ -1344,7 +1370,6 @@ class DataFrameEditor(QDialog):
             data = DataFrame(data)
 
         self.setWindowTitle(title)
-        self.resize(600, 500)
 
         self.hscroll = QScrollBar(Qt.Horizontal)
         self.vscroll = QScrollBar(Qt.Vertical)
@@ -1392,7 +1417,6 @@ class DataFrameEditor(QDialog):
         self.max_width = avg_width * 64  # Maximum size for columns
 
         self.setLayout(self.layout)
-        self.setMinimumSize(400, 300)
         # Make the dialog act as a window
         self.setWindowFlags(Qt.Window)
         btn_layout = QHBoxLayout()

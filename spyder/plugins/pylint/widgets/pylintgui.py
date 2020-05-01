@@ -12,8 +12,8 @@
 # pylint: disable=R0201
 
 # Standard library imports
-from __future__ import print_function, with_statement
 import os.path as osp
+import pickle
 import re
 import sys
 import time
@@ -27,30 +27,33 @@ from qtpy.QtWidgets import (QHBoxLayout, QLabel, QMessageBox, QTreeWidgetItem,
 
 # Local imports
 from spyder.config.base import get_conf_path, get_translation
-from spyder.py3compat import pickle, to_text_string
 from spyder.utils import icon_manager as ima
 from spyder.utils.qthelpers import create_toolbutton
 from spyder.utils.misc import getcwd_or_home
 from spyder.widgets.comboboxes import (is_module_or_package,
                                        PythonModulesComboBox)
 from spyder.widgets.onecolumntree import OneColumnTree
+from spyder.plugins.pylint.utils import get_pylintrc_path
 from spyder.plugins.variableexplorer.widgets.texteditor import TextEditor
 
 
 # This is needed for testing this module as a stand alone script
 try:
     _ = get_translation("pylint", "spyder_pylint")
-except KeyError as error:
+except KeyError:
     import gettext
     _ = gettext.gettext
 
+
 PYLINT_VER = pylint.__version__
-#TODO: display results on 3 columns instead of 1: msg_id, lineno, message
+
+
+# TODO: display results on 3 columns instead of 1: msg_id, lineno, message
 class ResultsTree(OneColumnTree):
     sig_edit_goto = Signal(str, int, str)
 
     def __init__(self, parent):
-        OneColumnTree.__init__(self, parent)
+        super().__init__(parent)
         self.filename = None
         self.results = None
         self.data = None
@@ -92,7 +95,7 @@ class ResultsTree(OneColumnTree):
                    ima.icon('error'), self.results['E:']))
         for title, icon, messages in results:
             title += ' (%d message%s)' % (len(messages),
-                                          's' if len(messages)>1 else '')
+                                          's' if len(messages) > 1 else '')
             title_item = QTreeWidgetItem(self, [title], QTreeWidgetItem.Type)
             title_item.setIcon(0, icon)
             if not messages:
@@ -129,7 +132,8 @@ class ResultsTree(OneColumnTree):
                     text = "[%s] %d : %s" % (msg_id, lineno, message)
                 else:
                     text = "%d : %s" % (lineno, message)
-                msg_item = QTreeWidgetItem(parent, [text], QTreeWidgetItem.Type)
+                msg_item = QTreeWidgetItem(parent, [text],
+                                           QTreeWidgetItem.Type)
                 msg_item.setIcon(0, ima.icon('arrow'))
                 self.data[id(msg_item)] = (modname, lineno)
 
@@ -145,7 +149,7 @@ class PylintWidget(QWidget):
 
     def __init__(self, parent, max_entries=100, options_button=None,
                  text_color=None, prevrate_color=None):
-        QWidget.__init__(self, parent)
+        super().__init__(parent)
 
         self.setWindowTitle("Pylint")
 
@@ -167,30 +171,37 @@ class PylintWidget(QWidget):
 
         self.filecombo = PythonModulesComboBox(self)
 
-        self.start_button = create_toolbutton(self, icon=ima.icon('run'),
-                                    text=_("Analyze"),
-                                    tip=_("Run analysis"),
-                                    triggered=self.analyze_button_handler,
-                                    text_beside_icon=True)
-        self.stop_button = create_toolbutton(self,
-                                             icon=ima.icon('stop'),
-                                             text=_("Stop"),
-                                             tip=_("Stop current analysis"),
-                                             text_beside_icon=True)
+        self.start_button = create_toolbutton(
+            self,
+            icon=ima.icon('run'),
+            text=_("Analyze"),
+            tip=_("Run analysis"),
+            triggered=self.analyze_button_handler,
+            text_beside_icon=True)
+        self.stop_button = create_toolbutton(
+            self,
+            icon=ima.icon('stop'),
+            text=_("Stop"),
+            tip=_("Stop current analysis"),
+            text_beside_icon=True)
         self.filecombo.valid.connect(self.start_button.setEnabled)
         self.filecombo.valid.connect(self.check_new_file)
 
-        browse_button = create_toolbutton(self, icon=ima.icon('fileopen'),
-                               tip=_('Select Python file'),
-                               triggered=self.select_file)
+        browse_button = create_toolbutton(
+            self,
+            icon=ima.icon('fileopen'),
+            tip=_('Select Python file'),
+            triggered=self.select_file)
 
         self.ratelabel = QLabel()
         self.datelabel = QLabel()
-        self.log_button = create_toolbutton(self, icon=ima.icon('log'),
-                                    text=_("Output"),
-                                    text_beside_icon=True,
-                                    tip=_("Complete output"),
-                                    triggered=self.show_log)
+        self.log_button = create_toolbutton(
+            self,
+            icon=ima.icon('log'),
+            text=_("Output"),
+            text_beside_icon=True,
+            tip=_("Complete output"),
+            triggered=self.show_log)
         self.treewidget = ResultsTree(self)
 
         hlayout1 = QHBoxLayout()
@@ -238,7 +249,7 @@ class PylintWidget(QWidget):
     @Slot(str)
     def set_filename(self, filename):
         """Set filename without performing code analysis."""
-        filename = to_text_string(filename) # filename is a QString instance
+        filename = str(filename)  # filename is a QString instance
         self.kill_if_running()
         index, _data = self.get_data(filename)
         if index is None:
@@ -302,22 +313,43 @@ class PylintWidget(QWidget):
     @Slot()
     def show_log(self):
         if self.output:
-            TextEditor(self.output, title=_("Pylint output"), parent=self,
-                       readonly=True, size=(700, 500)).exec_()
+            output_dialog = TextEditor(
+                self.output,
+                title=_("Pylint output"),
+                parent=self,
+                readonly=True
+            )
+            output_dialog.resize(700, 500)
+            output_dialog.exec_()
 
     @Slot()
     def analyze_button_handler(self):
         """Try to start code analysis when Analyze button pressed."""
         self.start_analysis.emit()
 
+    def get_pylintrc_path(self, filename):
+        """Get the path to the most proximate pylintrc config to the file."""
+        parent = self.parentWidget()
+        if parent is not None:
+            project_dir = parent.main.projects.get_active_project_path()
+        else:
+            project_dir = None
+        search_paths = [
+            osp.dirname(filename),  # File's directory
+            getcwd_or_home(),  # Working directory
+            project_dir,  # Project directory
+            osp.expanduser("~"),  # Home directory
+        ]
+        return get_pylintrc_path(search_paths=search_paths)
+
     @Slot()
     def start(self):
         """Start the code analysis."""
-        filename = to_text_string(self.filecombo.currentText())
+        filename = str(self.filecombo.currentText())
 
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.SeparateChannels)
-        self.process.setWorkingDirectory(osp.dirname(filename))
+        self.process.setWorkingDirectory(getcwd_or_home())
         self.process.readyReadStandardOutput.connect(self.read_output)
         self.process.readyReadStandardError.connect(
                                           lambda: self.read_output(error=True))
@@ -336,11 +368,14 @@ class PylintWidget(QWidget):
             else:
                 # Option '-i' (alias for '--include-ids') was removed in pylint
                 # 1.0
-                p_args += ["--msg-template='{msg_id}:{line:3d},"\
+                p_args += ["--msg-template='{msg_id}:{line:3d},"
                            "{column}: {obj}: {msg}"]
-            p_args += [osp.basename(filename)]
-        else:
-            p_args = [osp.basename(filename)]
+
+        pylintrc_path = self.get_pylintrc_path(filename=filename)
+        if pylintrc_path is not None:
+            p_args += ['--rcfile={}'.format(pylintrc_path)]
+
+        p_args += [filename]
         processEnvironment = QProcessEnvironment()
         processEnvironment.insert("PYTHONIOENCODING", "utf8")
         self.process.setProcessEnvironment(processEnvironment)
@@ -368,7 +403,7 @@ class PylintWidget(QWidget):
                 qba += self.process.readAllStandardError()
             else:
                 qba += self.process.readAllStandardOutput()
-        text = to_text_string(qba.data(), encoding='utf-8')
+        text = str(qba.data(), 'utf-8')
         if error:
             self.error_output += text
         else:
@@ -386,7 +421,7 @@ class PylintWidget(QWidget):
         results = {'C:': [], 'R:': [], 'W:': [], 'E:': []}
         txt_module = '************* Module '
 
-        module = '' # Should not be needed - just in case something goes wrong
+        module = ''  # Should not be needed - just in case something goes wrong
         for line in self.output.splitlines():
             if line.startswith(txt_module):
                 # New module
@@ -428,8 +463,7 @@ class PylintWidget(QWidget):
                 i_prun_end = self.output.find('/10', i_prun)
                 previous = self.output[i_prun+len(txt_prun):i_prun_end]
 
-
-        filename = to_text_string(self.filecombo.currentText())
+        filename = str(self.filecombo.currentText())
         self.set_data(filename, (time.localtime(), rate, previous, results))
         self.output = self.error_output + self.output
         self.show_data(justanalyzed=True)
@@ -443,10 +477,10 @@ class PylintWidget(QWidget):
     def show_data(self, justanalyzed=False):
         if not justanalyzed:
             self.output = None
-        self.log_button.setEnabled(self.output is not None \
+        self.log_button.setEnabled(self.output is not None
                                    and len(self.output) > 0)
         self.kill_if_running()
-        filename = to_text_string(self.filecombo.currentText())
+        filename = str(self.filecombo.currentText())
         if not filename:
             return
 
@@ -479,9 +513,7 @@ class PylintWidget(QWidget):
                     text_prun = ' (%s %s/10)' % (text_prun, previous_rate)
                     text += prevrate_style % (self.prevrate_color, text_prun)
                 self.treewidget.set_results(filename, results)
-                date = to_text_string(time.strftime("%Y-%m-%d %H:%M:%S",
-                                                    datetime),
-                                      encoding='utf8')
+                date = time.strftime("%Y-%m-%d %H:%M:%S", datetime)
                 date_text = text_style % (self.text_color, date)
 
         self.ratelabel.setText(text)

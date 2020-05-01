@@ -184,7 +184,8 @@ class DirView(QTreeView):
     #---- Model
     def setup_fs_model(self):
         """Setup filesystem model"""
-        filters = QDir.AllDirs | QDir.Files | QDir.Drives | QDir.NoDotAndDotDot
+        filters = (QDir.AllDirs | QDir.Files | QDir.Drives
+                   | QDir.NoDotAndDotDot | QDir.Hidden)
         self.fsmodel = QFileSystemModel(self)
         self.fsmodel.setFilter(filters)
         self.fsmodel.setNameFilterDisables(False)
@@ -902,7 +903,7 @@ class DirView(QTreeView):
                     return
             try:
                 misc.rename_file(fname, path)
-                if osp.isfile(fname):
+                if osp.isfile(path):
                     self.sig_renamed.emit(fname, path)
                 else:
                     self.sig_renamed_tree.emit(fname, path)
@@ -1730,47 +1731,55 @@ class ExplorerWidget(QWidget):
 #==============================================================================
 class FileExplorerTest(QWidget):
     def __init__(self, directory=None, file_associations={}):
-        QWidget.__init__(self)
-        vlayout = QVBoxLayout()
-        self.setLayout(vlayout)
-        self.explorer = ExplorerWidget(self, show_cd_only=None,
-                                       file_associations=file_associations)
+        super(FileExplorerTest, self).__init__()
+
         if directory is not None:
             self.directory = directory
         else:
             self.directory = osp.dirname(osp.abspath(__file__))
-        self.explorer.treewidget.set_current_folder(self.directory)
-        vlayout.addWidget(self.explorer)
 
-        hlayout1 = QHBoxLayout()
-        vlayout.addLayout(hlayout1)
-        label = QLabel("<b>Open file:</b>")
-        label.setAlignment(Qt.AlignRight)
-        hlayout1.addWidget(label)
+        self.explorer = ExplorerWidget(self, show_cd_only=None,
+                                       file_associations=file_associations)
+        self.label_dir = QLabel("<b>Open dir:</b>")
+        self.label_file = QLabel("<b>Open file:</b>")
         self.label1 = QLabel()
+        self.label_dir.setAlignment(Qt.AlignRight)
+        self.label2 = QLabel()
+        self.label_option = QLabel("<b>Option changed:</b>")
+        self.label3 = QLabel()
+
+        # Setup
+        self.explorer.treewidget.set_current_folder(self.directory)
+        self.label_file.setAlignment(Qt.AlignRight)
+        self.label_option.setAlignment(Qt.AlignRight)
+
+        # Layout
+        hlayout1 = QHBoxLayout()
+        hlayout1.addWidget(self.label_file)
         hlayout1.addWidget(self.label1)
-        self.explorer.sig_open_file.connect(self.label1.setText)
 
         hlayout2 = QHBoxLayout()
-        vlayout.addLayout(hlayout2)
-        label = QLabel("<b>Open dir:</b>")
-        label.setAlignment(Qt.AlignRight)
-        hlayout2.addWidget(label)
-        self.label2 = QLabel()
+        hlayout2.addWidget(self.label_dir)
         hlayout2.addWidget(self.label2)
-        self.explorer.open_dir.connect(self.label2.setText)
 
         hlayout3 = QHBoxLayout()
-        vlayout.addLayout(hlayout3)
-        label = QLabel("<b>Option changed:</b>")
-        label.setAlignment(Qt.AlignRight)
-        hlayout3.addWidget(label)
-        self.label3 = QLabel()
+        hlayout3.addWidget(self.label_option)
         hlayout3.addWidget(self.label3)
-        self.explorer.sig_option_changed.connect(
-           lambda x, y: self.label3.setText('option_changed: %r, %r' % (x, y)))
+
+        vlayout = QVBoxLayout()
+        vlayout.addWidget(self.explorer)
+        vlayout.addLayout(hlayout1)
+        vlayout.addLayout(hlayout2)
+        vlayout.addLayout(hlayout3)
+        self.setLayout(vlayout)
+
+        # Signals
+        self.explorer.open_dir.connect(self.label2.setText)
         self.explorer.open_dir.connect(
                                 lambda: self.explorer.treewidget.refresh('..'))
+        self.explorer.sig_open_file.connect(self.label1.setText)
+        self.explorer.sig_option_changed.connect(
+           lambda x, y: self.label3.setText('option_changed: %r, %r' % (x, y)))
 
 
 class ProjectExplorerTest(QWidget):

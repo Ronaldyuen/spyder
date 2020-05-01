@@ -48,6 +48,10 @@ def editor_plugin(qtbot, monkeypatch):
                 projects = Mock()
                 projects.get_active_project.return_value = None
                 return projects
+            elif attr == 'ipyconsole':
+                ipyconsole = Mock()
+                ipyconsole.get_pdb_state.return_value = False
+                return ipyconsole
             else:
                 return Mock()
 
@@ -74,7 +78,8 @@ def python_files(tmpdir_factory):
     tmpdir = osp.normcase(tmpdir.strpath)
 
     filenames = [osp.join(tmpdir, f) for f in
-                 ('file1.py', 'file2.py', 'file3.py', 'file4.py')]
+                 ('file1.py', 'file2.py', 'file3.py', 'file4.py',
+                  'untitled4.py')]
     for filename in filenames:
         with open(filename, 'w') as f:
             f.write("# -*- coding: utf-8 -*-\n"
