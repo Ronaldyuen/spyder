@@ -1049,6 +1049,7 @@ class DataFrameView(QTableView):
         for name, func in functions:
             def slot():
                 self.change_type(func)
+
             types_in_menu += [create_action(self, name,
                                             triggered=slot,
                                             context=Qt.WidgetShortcut)]
@@ -1992,10 +1993,8 @@ def _test_edit(data, title="", parent=None):
         sys.exit(1)
 
 
-import cProfile
-
-
 def _test_wrapper(func, df, is_profiling=False):
+    import cProfile
     if is_profiling:
         pr = cProfile.Profile()
         pr.enable()
