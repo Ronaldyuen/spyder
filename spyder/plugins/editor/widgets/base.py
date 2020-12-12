@@ -54,6 +54,13 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
         self.extra_selections_dict = {}
         self._restore_selection_pos = None
 
+        # Trailing newlines/spaces trimming
+        self.remove_trailing_spaces = False
+        self.remove_trailing_newlines = False
+
+        # Add a new line when saving
+        self.add_newline = False
+
         # Code snippets
         self.code_snippets = True
 
@@ -99,8 +106,6 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
         # Useful to avoid recomputing while scrolling.
         self.current_cell = None
 
-        self._cell_list = []
-
         def reset_current_cell():
             self.current_cell = None
 
@@ -117,6 +122,15 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
     def set_tab_stop_width_spaces(self, tab_stop_width_spaces):
         self.tab_stop_width_spaces = tab_stop_width_spaces
         self.update_tab_stop_width_spaces()
+
+    def set_remove_trailing_spaces(self, flag):
+        self.remove_trailing_spaces = flag
+
+    def set_add_newline(self, add_newline):
+        self.add_newline = add_newline
+
+    def set_remove_trailing_newlines(self, flag):
+        self.remove_trailing_newlines = flag
 
     def update_tab_stop_width_spaces(self):
         self.setTabStopWidth(self.fontMetrics().width(
@@ -157,7 +171,7 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
         Also assign draw orders to leave current_cell and current_line
         in the backgrund (and avoid them to cover other decorations)
 
-        NOTE: This will remove previous decorations added to  the same key.
+        NOTE: This will remove previous decorations added to the same key.
 
         Args:
             key (str) name of the extra selections group.
@@ -170,6 +184,7 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
 
         for selection in extra_selections:
             selection.draw_order = draw_order
+            selection.kind = key
 
         self.clear_extra_selections(key)
         self.extra_selections_dict[key] = extra_selections
@@ -193,13 +208,38 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
             key (str) name of the extra selections group.
         """
         for decoration in self.extra_selections_dict.get(key, []):
-            self.decorations.remove(decoration, update=False)
+            self.decorations.remove(decoration)
         self.extra_selections_dict[key] = []
         self.update()
 
     def changed(self):
         """Emit changed signal"""
         self.modificationChanged.emit(self.document().isModified())
+
+    def get_visible_block_numbers(self):
+        """Get the first and last visible block numbers."""
+        first = self.firstVisibleBlock().blockNumber()
+        bottom_right = QPoint(self.viewport().width() - 1,
+                              self.viewport().height() - 1)
+        last = self.cursorForPosition(bottom_right).blockNumber()
+        return (first, last)
+
+    def get_buffer_block_numbers(self):
+        """
+        Get the first and last block numbers of a region that covers
+        the visible one plus a buffer of half that region above and
+        below to make more fluid certain operations.
+        """
+        first_visible, last_visible = self.get_visible_block_numbers()
+        buffer_height = round((last_visible - first_visible) / 2)
+
+        first = first_visible - buffer_height
+        first = 0 if first < 0 else first
+
+        last = last_visible + buffer_height
+        last = self.blockCount() if last > self.blockCount() else last
+
+        return (first, last)
 
     #------Highlight current line
     def highlight_current_line(self):
@@ -219,11 +259,10 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
     #------Highlight current cell
     def highlight_current_cell(self):
         """Highlight current cell"""
-        if not self.has_cell_separators or \
-          not self.highlight_current_cell_enabled:
+        if (not self.has_cell_separators or
+                not self.highlight_current_cell_enabled):
             return
-        cursor, whole_file_selected =\
-            self.select_current_cell()
+        cursor, whole_file_selected = self.select_current_cell()
         selection = TextDecoration(cursor)
         selection.format.setProperty(QTextFormat.FullWidthSelection,
                                      to_qvariant(True))
@@ -380,23 +419,10 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
             super(TextEditBaseWidget, self).keyPressEvent(event)
 
     #------Text: get, set, ...
-    def add_to_cell_list(self, oedata):
-        """Add new cell to cell list."""
-        self._cell_list.append(oedata)
-
     def get_cell_list(self):
         """Get all cells."""
-        # Filter out old cells
-
-        def good(oedata):
-            return oedata.is_valid() and oedata.def_type == oedata.CELL
-
-        self._cell_list = [
-            oedata for oedata in self._cell_list if good(oedata)]
-
-        return sorted(
-            {oedata.get_block_number(): oedata
-             for oedata in self._cell_list}.items())
+        # Reimplemented in childrens
+        return []
 
     def get_selection_as_executable_code(self, cursor=None):
         """Return selected text as a processed text,
@@ -632,19 +658,21 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
         cursor.insertText(text)
         cursor.endEditBlock()
 
+        self.document_did_change()
+
     def duplicate_line_down(self):
         """
         Copy current line or selected text and paste the duplicated text
         *after* the current line or selected text.
         """
-        self.__duplicate_line_or_selection(after_current_line=True)
+        self.__duplicate_line_or_selection(after_current_line=False)
 
     def duplicate_line_up(self):
         """
         Copy current line or selected text and paste the duplicated text
         *before* the current line or selected text.
         """
-        self.__duplicate_line_or_selection(after_current_line=False)
+        self.__duplicate_line_or_selection(after_current_line=True)
 
     def __move_line_or_selection(self, after_current_line=True):
         """Move current line or selected text"""
@@ -654,7 +682,6 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
         last_line = False
 
         # ------ Select text
-
         # Get selection start location
         cursor.setPosition(start_pos)
         cursor.movePosition(QTextCursor.StartOfBlock)
@@ -673,7 +700,6 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
                 last_line = True
 
         # ------ Stop if at document boundary
-
         cursor.setPosition(start_pos)
         if cursor.atStart() and not after_current_line:
             # Stop if selection is already at top of the file while moving up
@@ -691,10 +717,8 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
             return
 
         # ------ Move text
-
         sel_text = to_text_string(cursor.selectedText())
         cursor.removeSelectedText()
-
 
         if after_current_line:
             # Shift selection down
@@ -725,6 +749,8 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
         self.setTextCursor(cursor)
         self.__restore_selection(start_pos, end_pos)
 
+        self.document_did_change()
+
     def move_line_up(self):
         """Move up current line or selected text"""
         self.__move_line_or_selection(after_current_line=False)
@@ -751,9 +777,10 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
                                 QTextCursor.KeepAnchor)
         self.setTextCursor(cursor)
 
-    def delete_line(self):
+    def delete_line(self, cursor=None):
         """Delete current line."""
-        cursor = self.textCursor()
+        if cursor is None:
+            cursor = self.textCursor()
         if self.has_selected_text():
             self.extend_selection_to_complete_lines()
             start_pos, end_pos = cursor.selectionStart(), cursor.selectionEnd()
@@ -880,19 +907,21 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
             # Handle completions for the internal console
             self.insert_text(text)
         else:
-            if self.code_snippets:
-                self.sig_insert_completion.emit(text)
-            else:
-                self.insert_text(text)
+            self.sig_insert_completion.emit(text)
             self.document_did_change()
 
     def is_completion_widget_visible(self):
         """Return True is completion list widget is visible"""
-        return self.completion_widget.isVisible()
+        try:
+            return self.completion_widget.isVisible()
+        except RuntimeError:
+            # This is to avoid a RuntimeError exception when the widget is
+            # already been deleted. See spyder-ide/spyder#13248.
+            return False
 
-    def hide_completion_widget(self):
+    def hide_completion_widget(self, focus_to_parent=True):
         """Hide completion widget and tooltip."""
-        self.completion_widget.hide()
+        self.completion_widget.hide(focus_to_parent=focus_to_parent)
         QToolTip.hideText()
 
     #------Standard keys
@@ -985,7 +1014,6 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
         """Reimplemented to handle focus"""
         self.focus_changed.emit()
         self.focus_in.emit()
-        self.highlight_current_cell()
         QPlainTextEdit.focusInEvent(self, event)
 
     def focusOutEvent(self, event):
@@ -1009,14 +1037,20 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
                     elif event.delta() > 0:
                         self.zoom_in.emit()
                 return
+
         QPlainTextEdit.wheelEvent(self, event)
-        # Needed to prevent stealing focus to the find widget when scrolling
+
+        # Needed to prevent stealing focus when scrolling.
+        # If the current widget with focus is the CompletionWidget, it means
+        # it's being displayed in the editor, so we need to hide it and give
+        # focus back to the editor. If not, we need to leave the focus in
+        # the widget that currently has it.
         # See spyder-ide/spyder#11502
         current_widget = QApplication.focusWidget()
-        self.hide_completion_widget()
-        self.highlight_current_cell()
-        if current_widget is not None:
-            current_widget.setFocus()
+        if isinstance(current_widget, CompletionWidget):
+            self.hide_completion_widget(focus_to_parent=True)
+        else:
+            self.hide_completion_widget(focus_to_parent=False)
 
     def position_widget_at_cursor(self, widget):
         # Retrieve current screen height

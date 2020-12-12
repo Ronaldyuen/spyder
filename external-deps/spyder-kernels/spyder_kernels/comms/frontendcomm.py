@@ -66,8 +66,8 @@ class FrontendComm(CommBase):
         # self.kernel.parent is IPKernelApp unless we are in tests
         if self.kernel.parent:
             # Create a new socket
-            context = zmq.Context()
-            self.comm_socket = context.socket(zmq.ROUTER)
+            self.context = zmq.Context()
+            self.comm_socket = self.context.socket(zmq.ROUTER)
             self.comm_socket.linger = 1000
 
             self.comm_port = get_free_port()
@@ -90,12 +90,17 @@ class FrontendComm(CommBase):
 
                 def close():
                     """Close comm_socket_thread."""
-                    self.comm_thread_close.set()
-                    context.term()
-                    self.comm_socket_thread.join()
+                    self.close_thread()
                     parent_close()
 
                 self.kernel.parent.close = close
+
+    def close_thread(self):
+        """Close comm."""
+        self.comm_thread_close.set()
+        self.comm_socket.close()
+        self.context.term()
+        self.comm_socket_thread.join()
 
     def poll_thread(self):
         """Receive messages from comm socket."""
@@ -114,6 +119,8 @@ class FrontendComm(CommBase):
             out_stream = self.kernel.shell_streams[0]
         try:
             ident, msg = self.kernel.session.recv(self.comm_socket, 0)
+        except zmq.error.ContextTerminated:
+            return
         except Exception:
             self.kernel.log.warning("Invalid Message:", exc_info=True)
             return
@@ -149,29 +156,35 @@ class FrontendComm(CommBase):
             callback=callback,
             timeout=timeout)
 
-    # --- Private --------
-    def _wait_reply(self, call_id, call_name, timeout, retry=True):
-        """Wait until the frontend replies to a request."""
-        if call_id in self._reply_inbox:
-            return
-
+    def wait_until(self, condition, timeout=None):
+        """Wait until condition is met. Returns False if timeout."""
+        if condition():
+            return True
         t_start = time.time()
-        while call_id not in self._reply_inbox:
-            if time.time() > t_start + timeout:
-                if retry:
-                    # Send config again just in case
-                    self._send_comm_config()
-                    self._wait_reply(call_id, call_name, timeout, False)
-                    return
-                raise TimeoutError(
-                    "Timeout while waiting for '{}' reply.".format(
-                        call_name))
+        while not condition():
+            if timeout is not None and time.time() > t_start + timeout:
+                return False
             if threading.current_thread() is self.comm_socket_thread:
                 # Wait for a reply on the comm channel.
                 self.poll_one()
             else:
                 # Wait 10ms for a reply
                 time.sleep(0.01)
+        return True
+
+    # --- Private --------
+    def _wait_reply(self, call_id, call_name, timeout, retry=True):
+        """Wait until the frontend replies to a request."""
+        def reply_received():
+            """The reply is there!"""
+            return call_id in self._reply_inbox
+        if not self.wait_until(reply_received):
+            if retry:
+                self._wait_reply(call_id, call_name, timeout, False)
+                return
+            raise TimeoutError(
+                "Timeout while waiting for '{}' reply.".format(
+                    call_name))
 
     def _comm_open(self, comm, msg):
         """
@@ -181,6 +194,11 @@ class FrontendComm(CommBase):
         self._register_comm(comm)
         self._set_pickle_protocol(msg['content']['data']['pickle_protocol'])
         self._send_comm_config()
+
+    def on_outgoing_call(self, call_dict):
+        """A message is about to be sent"""
+        call_dict["comm_port"] = self.comm_port
+        return super(FrontendComm, self).on_outgoing_call(call_dict)
 
     def _send_comm_config(self):
         """Send the comm config to the frontend."""

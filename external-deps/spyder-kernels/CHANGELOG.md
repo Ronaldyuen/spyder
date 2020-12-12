@@ -1,6 +1,107 @@
 # History of changes
 
-## Version v1.9.0 (2020-03-14)
+## Version 1.10.0 (2020-11-08)
+
+### New features
+
+* Use '!' to prefix Pdb commands.
+* Show length of all iterables.
+
+### Issues Closed
+
+* [Issue 247](https://github.com/spyder-ide/spyder-kernels/issues/247) - Remove from warning that future versions of Spyder will give an error when using non-Python syntax ([PR 243](https://github.com/spyder-ide/spyder-kernels/pull/243) by [@impact27](https://github.com/impact27))
+* [Issue 245](https://github.com/spyder-ide/spyder-kernels/issues/245) - Display size of string in variable editor
+
+In this release 2 issues were closed.
+
+### Pull Requests Merged
+
+* [PR 255](https://github.com/spyder-ide/spyder-kernels/pull/255) - PR: Fix warning for '!' Pdb option, by [@impact27](https://github.com/impact27)
+* [PR 253](https://github.com/spyder-ide/spyder-kernels/pull/253) - PR: Extend sys.path with paths that come from Spyder, by [@ccordoba12](https://github.com/ccordoba12)
+* [PR 252](https://github.com/spyder-ide/spyder-kernels/pull/252) - PR: Use frame locals when evaluating code in Pdb, by [@impact27](https://github.com/impact27)
+* [PR 251](https://github.com/spyder-ide/spyder-kernels/pull/251) - PR: Catch errors when trying to get the len of an object, by [@impact27](https://github.com/impact27)
+* [PR 250](https://github.com/spyder-ide/spyder-kernels/pull/250) - PR: Show size of objects correctly, if they implement len(), by [@skjerns](https://github.com/skjerns)
+* [PR 246](https://github.com/spyder-ide/spyder-kernels/pull/246) - PR: Allow sorting with custom sorting key, by [@skjerns](https://github.com/skjerns)
+* [PR 244](https://github.com/spyder-ide/spyder-kernels/pull/244) - PR: Set multiprocessing ORIGINAL_DIR at startup, by [@impact27](https://github.com/impact27) ([13632](https://github.com/spyder-ide/spyder/issues/13632))
+* [PR 243](https://github.com/spyder-ide/spyder-kernels/pull/243) - PR: Allow leading indents in cells, by [@impact27](https://github.com/impact27) ([247](https://github.com/spyder-ide/spyder-kernels/issues/247))
+* [PR 242](https://github.com/spyder-ide/spyder-kernels/pull/242) - PR: Display error if required, by [@impact27](https://github.com/impact27)
+* [PR 240](https://github.com/spyder-ide/spyder-kernels/pull/240) - PR: Hide runcell and runfile frames using a new IPython feature, by [@impact27](https://github.com/impact27)
+* [PR 239](https://github.com/spyder-ide/spyder-kernels/pull/239) - PR: Improve Pdb input handling, by [@impact27](https://github.com/impact27)
+* [PR 232](https://github.com/spyder-ide/spyder-kernels/pull/232) - PR: Make do_where go to the current file, by [@impact27](https://github.com/impact27)
+* [PR 223](https://github.com/spyder-ide/spyder-kernels/pull/223) - PR: Add methods to handle IPython console config on the fly, by [@dalthviz](https://github.com/dalthviz)
+* [PR 214](https://github.com/spyder-ide/spyder-kernels/pull/214) - PR: Use '!' for Pdb commands, by [@impact27](https://github.com/impact27)
+
+In this release 14 pull requests were closed.
+
+----
+
+## Version 1.9.4 (2020-09-01)
+
+### Pull Requests Merged
+
+* [PR 238](https://github.com/spyder-ide/spyder-kernels/pull/238) - PR: Set get_local_scope correctly while debugging, by [@impact27](https://github.com/impact27)
+* [PR 235](https://github.com/spyder-ide/spyder-kernels/pull/235) - PR: Set debug state correctly on exception, by [@impact27](https://github.com/impact27)
+* [PR 233](https://github.com/spyder-ide/spyder-kernels/pull/233) - PR: Don't save file in runcell, by [@impact27](https://github.com/impact27)
+
+In this release 3 pull requests were closed.
+
+----
+
+## Version 1.9.3 (2020-07-24)
+
+### Issues Closed
+
+* [Issue 236](https://github.com/spyder-ide/spyder-kernels/issues/236) - test_dask_multiprocessing fails with pip packages ([PR 237](https://github.com/spyder-ide/spyder-kernels/pull/237) by [@bnavigator](https://github.com/bnavigator))
+
+In this release 1 issue was closed.
+
+### Pull Requests Merged
+
+* [PR 237](https://github.com/spyder-ide/spyder-kernels/pull/237) - PR: Require dask[distributed] for tests, by [@bnavigator](https://github.com/bnavigator) ([236](https://github.com/spyder-ide/spyder-kernels/issues/236))
+
+In this release 1 pull request was closed.
+
+----
+
+## Version 1.9.2 (2020-07-10)
+
+### Pull Requests Merged
+
+* [PR 234](https://github.com/spyder-ide/spyder-kernels/pull/234) - PR: Fix a problem caused by ipykernel 5.3.1, by [@ccordoba12](https://github.com/ccordoba12)
+* [PR 231](https://github.com/spyder-ide/spyder-kernels/pull/231) - PR: Send comm config on every message, by [@impact27](https://github.com/impact27)
+* [PR 230](https://github.com/spyder-ide/spyder-kernels/pull/230) - PR: Send comm config before any wait just to be sure, by [@impact27](https://github.com/impact27)
+* [PR 229](https://github.com/spyder-ide/spyder-kernels/pull/229) - PR: Add warning on console if file is not saved, by [@impact27](https://github.com/impact27)
+* [PR 228](https://github.com/spyder-ide/spyder-kernels/pull/228) - PR: Fix post_mortem interaction, by [@dalthviz](https://github.com/dalthviz)
+* [PR 227](https://github.com/spyder-ide/spyder-kernels/pull/227) - PR: Create a constant for numeric Numpy types, by [@dalthviz](https://github.com/dalthviz)
+* [PR 226](https://github.com/spyder-ide/spyder-kernels/pull/226) - PR: Backport PR 225, by [@ccordoba12](https://github.com/ccordoba12)
+* [PR 222](https://github.com/spyder-ide/spyder-kernels/pull/222) - PR: Remove the current working directory from sys.path for Python 3.7+, by [@ccordoba12](https://github.com/ccordoba12)
+* [PR 220](https://github.com/spyder-ide/spyder-kernels/pull/220) - PR: Make multithreading patch work for all OSes in Python 3, by [@steff456](https://github.com/steff456) ([12465](https://github.com/spyder-ide/spyder/issues/12465))
+
+In this release 9 pull requests were closed.
+
+----
+
+## Version 1.9.1 (2020-05-06)
+
+### Issues Closed
+
+* [Issue 217](https://github.com/spyder-ide/spyder-kernels/issues/217) - Maximum recursion depth exceeded ([PR 218](https://github.com/spyder-ide/spyder-kernels/pull/218) by [@ccordoba12](https://github.com/ccordoba12))
+
+In this release 1 issue was closed.
+
+### Pull Requests Merged
+
+* [PR 219](https://github.com/spyder-ide/spyder-kernels/pull/219) - PR: Check that startup file exists, by [@impact27](https://github.com/impact27) ([12442](https://github.com/spyder-ide/spyder/issues/12442))
+* [PR 218](https://github.com/spyder-ide/spyder-kernels/pull/218) - PR: Avoid an error when computing the shape of Pandas objects, by [@ccordoba12](https://github.com/ccordoba12) ([217](https://github.com/spyder-ide/spyder-kernels/issues/217))
+* [PR 215](https://github.com/spyder-ide/spyder-kernels/pull/215) - PR: Fix post mortem functionality, by [@impact27](https://github.com/impact27)
+* [PR 212](https://github.com/spyder-ide/spyder-kernels/pull/212) - PR: Set namespace correctly when running in new namespace, by [@impact27](https://github.com/impact27)
+* [PR 211](https://github.com/spyder-ide/spyder-kernels/pull/211) - PR: Use Exception instead of ImportError in is_special_kernel_valid, by [@ccordoba12](https://github.com/ccordoba12)
+
+In this release 5 pull requests were closed.
+
+----
+
+## Version 1.9.0 (2020-03-14)
 
 ### New features
 

@@ -19,7 +19,7 @@ from qtpy.QtWidgets import QMessageBox
 from spyder.config.base import _, running_under_pytest
 from spyder.config.manager import CONF
 from spyder.utils.programs import run_program
-from spyder.api.completion import SpyderCompletionPlugin
+from spyder.plugins.completion.manager.api import SpyderCompletionPlugin
 from spyder.plugins.completion.kite.client import KiteClient
 from spyder.plugins.completion.kite.utils.status import (
     check_if_kite_running, check_if_kite_installed)
@@ -70,12 +70,14 @@ class KiteCompletionPlugin(SpyderCompletionPlugin):
         self.client.sig_status_response_ready.connect(self._kite_onboarding)
         self.client.sig_onboarding_response_ready.connect(
             self._show_onboarding_file)
+        self.client.sig_client_wrong_response.connect(
+            self._wrong_response_error)
 
         self.installation_thread.sig_installation_status.connect(
             self.set_status)
         self.status_widget.sig_clicked.connect(
             self.show_installation_dialog)
-        self.main.sig_setup_finished.connect(self.mainwindow_setup_finished)
+        # self.main.sig_setup_finished.connect(self.mainwindow_setup_finished)
 
         # Config
         self.update_configuration()
@@ -161,8 +163,8 @@ class KiteCompletionPlugin(SpyderCompletionPlugin):
                       "If you want to use Kite, please remove the "
                       "directory that appears bellow, "
                       "and try a reinstallation:<br><br>"
-                      "<code>{kite_dir}</code>".format(
-                          kite_dir=osp.dirname(path))))
+                      "<code>{kite_dir}</code>").format(
+                          kite_dir=osp.dirname(path)))
 
                 box.exec_()
 
@@ -222,3 +224,16 @@ class KiteCompletionPlugin(SpyderCompletionPlugin):
             return
         self.set_option('show_onboarding', False)
         self.main.open_file(onboarding_file)
+
+    @Slot(str, object)
+    def _wrong_response_error(self, method, resp):
+        QMessageBox.critical(
+            self.main, _('Kite error'),
+            _("The Kite completion engine returned an unexpected result "
+              "for the request <tt>{0}</tt>: <br><br><tt>{1}</tt><br><br>"
+              "Please make sure that your Kite installation is correct. "
+              "In the meantime, Spyder will disable the Kite client to "
+              "prevent further errors. For more information, please "
+              "visit the <a href='https://help.kite.com/'>Kite help "
+              "center</a>").format(method, resp))
+        self.set_option('enable', False)

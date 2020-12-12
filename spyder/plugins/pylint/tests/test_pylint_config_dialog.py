@@ -24,12 +24,13 @@ class MainWindowMock(QObject):
         super().__init__(None)
         self.editor = Mock()
         self.editor.sig_editor_focus_changed = self.sig_editor_focus_changed
+        self.projects = Mock()
 
 
 @pytest.mark.parametrize(
     'config_dialog',
     # [[MainWindowMock, [ConfigPlugins], [Plugins]]]
-    [[MainWindowMock, [], [Pylint]]],
+    [[None, [], [Pylint]]],
     indirect=True)
 def test_config_dialog(config_dialog):
     configpage = config_dialog.get_page()

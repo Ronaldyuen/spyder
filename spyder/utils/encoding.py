@@ -13,6 +13,7 @@ source code (Utilities/__init___.py) Copyright © 2003-2009 Detlev Offenbach
 
 # Standard library imports
 from codecs import BOM_UTF8, BOM_UTF16, BOM_UTF32
+import tempfile
 import locale
 import re
 import os
@@ -261,11 +262,18 @@ def write(text, filename, encoding='utf-8', mode='wb'):
             # Creating a new file, emulate what os.open() does
             umask = os.umask(0)
             os.umask(umask)
-            original_mode = 0o777 & ~umask
+            # Set base permission of a file to standard permissions.
+            # See #spyder-ide/spyder#14112.
+            original_mode = 0o666 & ~umask
             creation = time.time()
         try:
+            # fixes issues with scripts in Dropbox leaving
+            # temporary files in the folder, see spyder-ide/spyder#13041
+            tempfolder = None
+            if 'dropbox' in absolute_filename.lower():
+                tempfolder = tempfile.gettempdir()
             with atomic_write(absolute_filename, overwrite=True,
-                              mode=mode) as textfile:
+                              mode=mode, dir=tempfolder) as textfile:
                 textfile.write(text)
         except OSError as error:
             # Some filesystems don't support the option to sync directories

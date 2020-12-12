@@ -37,8 +37,10 @@ def get_version(module='spyder_kernels'):
 
 REQUIREMENTS = [
     'cloudpickle',
-    'ipykernel',
-    'ipykernel>=5.1.3; python_version>"2"',
+    'ipykernel<5; python_version<"3"',
+    'ipykernel>=5.1.3; python_version>="3"',
+    'ipython<6; python_version<"3"',
+    'ipython>=7.6.0; python_version>="3"',
     'jupyter-client>=5.3.4',
     'pyzmq>=17',
     'wurlitzer>=1.0.3;platform_system!="Windows"',
@@ -47,6 +49,7 @@ REQUIREMENTS = [
 TEST_REQUIREMENTS = [
     'codecov',
     'cython',
+    'dask[distributed]',
     'flaky',
     'matplotlib',
     'mock',
@@ -56,6 +59,7 @@ TEST_REQUIREMENTS = [
     'pytest-cov',
     'scipy',
     'xarray',
+    'pillow',
 ]
 
 setup(

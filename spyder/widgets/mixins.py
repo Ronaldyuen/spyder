@@ -670,6 +670,10 @@ class BaseEditMixin(object):
         self._last_point = None
         self.tooltip_widget.hide()
 
+    # ----- Required methods for the LSP
+    def document_did_change(self, text=None):
+        pass
+
     #------EOL characters
     def set_eol_chars(self, text):
         """Set widget end-of-line (EOL) characters from text (analyzes text)"""
@@ -682,6 +686,7 @@ class BaseEditMixin(object):
             self.document().setModified(True)
             if self.sig_eol_chars_changed is not None:
                 self.sig_eol_chars_changed.emit(eol_chars)
+            self.document_did_change(text)
 
     def get_line_separator(self):
         """Return line separator based on current EOL mode"""
@@ -928,6 +933,7 @@ class BaseEditMixin(object):
             self.textCursor().insertText(text)
             if self.sig_text_was_inserted is not None:
                 self.sig_text_was_inserted.emit()
+            self.document_did_change()
 
     def replace_text(self, position_from, position_to, text):
         cursor = self.__select_text(position_from, position_to)
@@ -940,6 +946,7 @@ class BaseEditMixin(object):
         cursor.insertText(text)
         if self.sig_text_was_inserted is not None:
             self.sig_text_was_inserted.emit()
+        self.document_did_change()
 
     def remove_text(self, position_from, position_to):
         cursor = self.__select_text(position_from, position_to)
@@ -947,6 +954,7 @@ class BaseEditMixin(object):
             start, end = self.get_selection_start_end(cursor)
             self.sig_will_remove_selection.emit(start, end)
         cursor.removeSelectedText()
+        self.document_did_change()
 
     def get_current_object(self):
         """
@@ -1158,6 +1166,7 @@ class BaseEditMixin(object):
     def remove_selected_text(self):
         """Delete selected text."""
         self.textCursor().removeSelectedText()
+        self.document_did_change()
 
     def replace(self, text, pattern=None):
         """Replace selected text by *text*.
@@ -1181,6 +1190,7 @@ class BaseEditMixin(object):
         if self.sig_text_was_inserted is not None:
             self.sig_text_was_inserted.emit()
         cursor.endEditBlock()
+        self.document_did_change()
 
 
     #------Find/replace
@@ -1357,12 +1367,16 @@ class BaseEditMixin(object):
                 if self.sig_text_was_inserted is not None:
                     self.sig_text_was_inserted.emit()
                 cursor.endEditBlock()
+                self.document_did_change()
 
 
 class TracebackLinksMixin(object):
     """ """
     QT_CLASS = None
-    go_to_error = None
+
+    # This signal emits a parsed error traceback text so we can then
+    # request opening the file that traceback comes from in the Editor.
+    sig_go_to_error_requested = None
 
     def __init__(self):
         self.__cursor_changed = False
@@ -1374,8 +1388,8 @@ class TracebackLinksMixin(object):
         self.QT_CLASS.mouseReleaseEvent(self, event)
         text = self.get_line_at(event.pos())
         if get_error_match(text) and not self.has_selected_text():
-            if self.go_to_error is not None:
-                self.go_to_error.emit(text)
+            if self.sig_go_to_error_requested is not None:
+                self.sig_go_to_error_requested.emit(text)
 
     def mouseMoveEvent(self, event):
         """Show Pointing Hand Cursor on error messages"""
@@ -1400,13 +1414,9 @@ class TracebackLinksMixin(object):
 
 
 class GetHelpMixin(object):
-    def __init__(self):
-        self.help = None
-        self.help_enabled = False
 
-    def set_help(self, help_plugin):
-        """Set Help DockWidget reference"""
-        self.help = help_plugin
+    def __init__(self):
+        self.help_enabled = False
 
     def set_help_enabled(self, state):
         self.help_enabled = state
@@ -1422,21 +1432,12 @@ class GetHelpMixin(object):
 
         # Show docstring
         help_enabled = self.help_enabled or force
-        if force and self.help is not None:
-            self.help.dockwidget.setVisible(True)
-            self.help.dockwidget.raise_()
-        if help_enabled and (self.help is not None) and \
-           (self.help.dockwidget.isVisible()):
-            # Help widget exists and is visible
-            if hasattr(self, 'get_doc'):
-                self.help.set_shell(self)
-            else:
-                self.help.set_shell(self.parent())
-            self.help.set_object_text(text, ignore_unknown=False)
-            self.setFocus() # if help was not at top level, raising it to
-                            # top will automatically give it focus because of
-                            # the visibility_changed signal, so we must give
-                            # focus back to shell
+        if help_enabled:
+            doc = {
+                'name': text,
+                'ignore_unknown': False,
+            }
+            self.sig_help_requested.emit(doc)
 
         # Show calltip
         if call and getattr(self, 'calltips', None):

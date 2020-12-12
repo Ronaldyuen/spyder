@@ -12,6 +12,7 @@
 # pylint: disable=R0201
 
 # Standard library imports
+import os
 import os.path as osp
 import sys
 
@@ -256,15 +257,27 @@ class BaseTabs(QTabWidget):
         self.corner_widgets = {}
         self.menu_use_tooltips = menu_use_tooltips
 
-        self.setStyleSheet("QTabWidget::tab-bar {"
-                           "alignment: left;}")
-
         if menu is None:
             self.menu = QMenu(self)
             if actions:
                 add_actions(self.menu, actions)
         else:
             self.menu = menu
+
+        # QTabBar forces the corner widgets to be smaller than they should on
+        # some plugins, like History. The top margin added allows the
+        # toolbuttons to expand to their normal size.
+        # See: spyder-ide/spyder#13600
+        top_margin = 9 if os.name == "nt" else 5
+        self.setStyleSheet(
+            f"""
+            QTabBar::tab {{
+                margin-top: {top_margin}px;
+            }}
+            QTabWidget::tab-bar {{
+                alignment: left;
+            }}
+            """)
 
         # Corner widgets
         if corner_widgets is None:
@@ -352,16 +365,34 @@ class BaseTabs(QTabWidget):
         self.set_corner_widgets({corner:
                                  self.corner_widgets.get(corner, [])+widgets})
 
+    def get_offset_pos(self, event):
+        """
+        Add offset to position event to capture the mouse cursor
+        inside a tab.
+        """
+        # This is necessary because self.tabBar().tabAt(event.pos()) is not
+        # returning the expected index. For further information see
+        # spyder-ide/spyder#12617
+        point = event.pos()
+        if sys.platform == 'darwin':
+            # The close button on tab is on the left
+            point.setX(point.x() + 3)
+        else:
+            # The close buttton on tab is on the right
+            point.setX(point.x() - 30)
+        return self.tabBar().tabAt(point)
+
     def contextMenuEvent(self, event):
         """Override Qt method"""
-        self.setCurrentIndex(self.tabBar().tabAt(event.pos()))
+        index = self.get_offset_pos(event)
+        self.setCurrentIndex(index)
         if self.menu:
             self.menu.popup(event.globalPos())
 
     def mousePressEvent(self, event):
         """Override Qt method"""
         if event.button() == Qt.MidButton:
-            index = self.tabBar().tabAt(event.pos())
+            index = self.get_offset_pos(event)
             if index >= 0:
                 self.sig_close_tab.emit(index)
                 event.accept()

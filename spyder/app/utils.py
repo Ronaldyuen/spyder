@@ -17,16 +17,43 @@ import sys
 # Third-party imports
 import psutil
 from qtpy.QtCore import QCoreApplication, Qt
+from qtpy.QtGui import QPixmap
+from qtpy.QtWidgets import QSplashScreen
 
 # Local imports
-from spyder.config.base import DEV, get_conf_path, get_debug_level
+from spyder.config.base import (DEV, get_conf_path, get_debug_level,
+                                get_image_path, running_under_pytest)
 from spyder.utils.qthelpers import file_uri
+from spyder.utils.external.dafsa.dafsa import DAFSA
 
 # For spyder-ide/spyder#7447.
 try:
     from qtpy.QtQuick import QQuickWindow, QSGRendererInterface
 except Exception:
     QQuickWindow = QSGRendererInterface = None
+
+
+root_logger = logging.getLogger()
+FILTER_NAMES = os.environ.get('SPYDER_FILTER_LOG', "").split(',')
+FILTER_NAMES = [f.strip() for f in FILTER_NAMES]
+
+
+class Spy:
+    """
+    This is used to inject a 'spy' object in the internal console
+    namespace to inspect Spyder internals.
+
+    Attributes:
+        app       Reference to main QApplication object
+        window    Reference to spyder.MainWindow widget
+    """
+    def __init__(self, app, window):
+        self.app = app
+        self.window = window
+
+    def __dir__(self):
+        return (list(self.__dict__.keys()) +
+                [x for x in dir(self.__class__) if x[0] != '_'])
 
 
 def get_python_doc_path():
@@ -77,15 +104,41 @@ def setup_logging(cli_options):
         log_level = levels[get_debug_level()]
         log_format = '%(asctime)s [%(levelname)s] [%(name)s] -> %(message)s'
 
+        console_filters = cli_options.filter_log.split(',')
+        console_filters = [x.strip() for x in console_filters]
+        console_filters = console_filters + FILTER_NAMES
+        console_filters = [x for x in console_filters if x != '']
+
+        handlers = [logging.StreamHandler()]
         if cli_options.debug_output == 'file':
             log_file = 'spyder-debug.log'
+            handlers.append(
+                logging.FileHandler(filename=log_file, mode='w+')
+            )
         else:
             log_file = None
 
-        logging.basicConfig(level=log_level,
-                            format=log_format,
-                            filename=log_file,
-                            filemode='w+')
+        match_func = lambda x: True
+        if console_filters != [''] and len(console_filters) > 0:
+            dafsa = DAFSA(console_filters)
+            match_func = lambda x: (dafsa.lookup(x, stop_on_prefix=True)
+                                    is not None)
+
+        formatter = logging.Formatter(log_format)
+
+        class ModuleFilter(logging.Filter):
+            """Filter messages based on module name prefix."""
+
+            def filter(self, record):
+                return match_func(record.name)
+
+        filter = ModuleFilter()
+        root_logger.setLevel(log_level)
+        for handler in handlers:
+            handler.addFilter(filter)
+            handler.setFormatter(formatter)
+            handler.setLevel(log_level)
+            root_logger.addHandler(handler)
 
 
 def delete_lsp_log_files():
@@ -116,3 +169,16 @@ def qt_message_handler(msg_type, msg_log_context, msg_string):
     ]
     if DEV or msg_string not in BLACKLIST:
         print(msg_string)  # spyder: test-skip
+
+
+def create_splash_screen():
+    """Create splash screen."""
+    if not running_under_pytest():
+        splash = QSplashScreen(QPixmap(get_image_path('splash.svg')))
+        splash_font = splash.font()
+        splash_font.setPixelSize(10)
+        splash.setFont(splash_font)
+    else:
+        splash = None
+
+    return splash

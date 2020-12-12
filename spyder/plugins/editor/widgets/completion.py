@@ -19,7 +19,7 @@ from qtpy.QtWidgets import (QAbstractItemView, QApplication, QListWidget,
 # Local imports
 from spyder.utils import icon_manager as ima
 from spyder.plugins.completion.kite.providers.document import KITE_COMPLETION
-from spyder.plugins.completion.languageserver import CompletionItemKind
+from spyder.plugins.completion.manager.api import CompletionItemKind
 from spyder.py3compat import to_text_string
 from spyder.widgets.helperwidgets import HTMLDelegate
 
@@ -281,12 +281,18 @@ class CompletionWidget(QListWidget):
 
         return ''.join(parts)
 
-    def hide(self):
+    def hide(self, focus_to_parent=True):
         """Override Qt method."""
         self.completion_position = None
         self.completion_list = None
         self.clear()
-        self.textedit.setFocus()
+
+        # Used to control when to give focus to its parent.
+        # This is necessary to have a better fix than the initially
+        # proposed for issue spyder-ide/spyder#11502.
+        if focus_to_parent:
+            self.textedit.setFocus()
+
         tooltip = getattr(self.textedit, 'tooltip_widget', None)
         if tooltip:
             tooltip.hide()

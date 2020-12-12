@@ -122,6 +122,20 @@ def get_options(argv=None):
               "'terminal'.")
     )
     parser.add_argument(
+        '--filter-log',
+        default='',
+        help="Comma-separated module name hierarchies whose log "
+             "messages should be shown. e.g., "
+             "spyder.plugins.completion,spyder.plugins.editor"
+    )
+    parser.add_argument(
+        '--safe-mode',
+        dest="safe_mode",
+        action='store_true',
+        default=False,
+        help="Start Spyder with a clean configuration directory"
+    )
+    parser.add_argument(
         '--report-segfault',
         dest="report_segfault",
         action='store_true',

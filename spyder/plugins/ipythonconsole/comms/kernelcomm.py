@@ -16,7 +16,7 @@ import jupyter_client
 from qtpy.QtCore import QEventLoop, QObject, QTimer, Signal
 import zmq
 
-from spyder_kernels.comms.commbase import CommBase
+from spyder_kernels.comms.commbase import CommBase, CommError
 from spyder.py3compat import TimeoutError
 
 logger = logging.getLogger(__name__)
@@ -32,8 +32,8 @@ class KernelComm(CommBase, QObject):
     """
 
     _sig_got_reply = Signal()
-    _sig_channel_open = Signal()
-    sig_exception_occurred = Signal(str, bool)
+    _sig_comm_port_changed = Signal()
+    sig_exception_occurred = Signal(dict)
 
     def __init__(self):
         super(KernelComm, self).__init__()
@@ -46,6 +46,8 @@ class KernelComm(CommBase, QObject):
 
     def _set_comm_port(self, port):
         """Set comm port."""
+        if port is None:
+            return
         client = self.kernel_client
         if not (hasattr(client, 'comm_port') and client.comm_port == port):
             client.comm_port = port
@@ -54,8 +56,8 @@ class KernelComm(CommBase, QObject):
                 'comm', identity=identity)
             client.comm_channel = client.shell_channel_class(
                 socket, client.session, client.ioloop)
-        # We emit in case we are waiting on this
-        self._sig_channel_open.emit()
+            # We emit in case we are waiting on this
+            self._sig_comm_port_changed.emit()
 
     def shutdown_comm_channel(self):
         """Shutdown the comm channel."""
@@ -80,11 +82,7 @@ class KernelComm(CommBase, QObject):
         if not self.comm_channel_connected():
             # Ask again for comm config
             self.remote_call()._send_comm_config()
-            timeout = 45
-            self._wait(self.comm_channel_connected,
-                       self._sig_channel_open,
-                       "Timeout while waiting for comm port.",
-                       timeout)
+            raise CommError("Comm not connected.")
 
         id_list = self.get_comm_id_list(comm_id)
         for comm_id in id_list:
@@ -99,7 +97,9 @@ class KernelComm(CommBase, QObject):
 
     def _set_call_return_value(self, call_dict, data, is_error=False):
         """Override to use the comm_channel for all replies."""
-        with self.comm_channel_manager(self.calling_comm_id):
+        # Avoid crash if comm channel not connected
+        queue_message = not self.comm_channel_connected()
+        with self.comm_channel_manager(self.calling_comm_id, queue_message):
             super(KernelComm, self)._set_call_return_value(
                 call_dict, data, is_error)
 
@@ -113,23 +113,68 @@ class KernelComm(CommBase, QObject):
                 'pickle_protocol': pickle.HIGHEST_PROTOCOL}))
 
     def remote_call(self, interrupt=False, blocking=False, callback=None,
-                    comm_id=None, timeout=None):
+                    comm_id=None, timeout=None, display_error=False):
         """Get a handler for remote calls."""
         return super(KernelComm, self).remote_call(
             interrupt=interrupt, blocking=blocking, callback=callback,
-            comm_id=comm_id, timeout=timeout)
+            comm_id=comm_id, timeout=timeout, display_error=display_error)
 
     # ---- Private -----
+    def on_incoming_call(self, call_dict):
+        """A call was received"""
+        if "comm_port" in call_dict:
+            self._set_comm_port(call_dict["comm_port"])
+        return super(KernelComm, self).on_incoming_call(call_dict)
+
     def _get_call_return_value(self, call_dict, call_data, comm_id):
         """
         Interupt the kernel if needed.
         """
         settings = call_dict['settings']
-        interrupt = 'interrupt' in settings and settings['interrupt']
+        blocking = 'blocking' in settings and settings['blocking']
 
-        with self.comm_channel_manager(comm_id, queue_message=not interrupt):
-            return super(KernelComm, self)._get_call_return_value(
-                call_dict, call_data, comm_id)
+        if not self.kernel_client.is_alive():
+            if blocking:
+                raise RuntimeError("Kernel is dead")
+            else:
+                # The user has other problems
+                logger.info(
+                    "Dropping message because kernel is dead: ",
+                    str(call_dict)
+                )
+                return
+
+        settings = call_dict['settings']
+        interrupt = 'interrupt' in settings and settings['interrupt']
+        interrupt = interrupt or blocking
+        # Need to make sure any blocking call is replied rapidly.
+        if interrupt and not self.comm_channel_connected():
+            # Ask again for comm config
+            self.remote_call()._send_comm_config()
+            # Can not interrupt if comm not connected
+            interrupt = False
+            logger.debug(
+                "Dropping interrupt because comm is disconnected: " +
+                str(call_dict)
+            )
+            if blocking:
+                raise CommError("Cannot block on a disconnected comm")
+        try:
+            with self.comm_channel_manager(
+                    comm_id, queue_message=not interrupt):
+                return super(KernelComm, self)._get_call_return_value(
+                    call_dict, call_data, comm_id)
+        except RuntimeError as e:
+            if blocking:
+                raise
+            else:
+                # The user has other problems
+                logger.info(
+                    "Dropping message because of exception: ",
+                    str(e),
+                    str(call_dict)
+                )
+                return
 
     def _wait_reply(self, call_id, call_name, timeout):
         """Wait for the other side reply."""
@@ -149,28 +194,40 @@ class KernelComm(CommBase, QObject):
         timeout_msg: Message to display in case of a timeout.
         timeout: time in seconds before a timeout
         """
+        # Exit if condition is fulfilled or the kernel is dead.
         if condition():
             return
+        if not self.kernel_client.is_alive():
+            raise RuntimeError("Kernel is dead")
 
         # Create event loop to wait with
         wait_loop = QEventLoop()
-        signal.connect(wait_loop.quit)
         wait_timeout = QTimer()
         wait_timeout.setSingleShot(True)
+
+        # Connect signals to stop kernel loop
         wait_timeout.timeout.connect(wait_loop.quit)
+        self.kernel_client.hb_channel.kernel_died.connect(wait_loop.quit)
+        signal.connect(wait_loop.quit)
 
         # Wait until the kernel returns the value
         wait_timeout.start(timeout * 1000)
         while not condition():
             if not wait_timeout.isActive():
                 signal.disconnect(wait_loop.quit)
-                if not condition():
-                    raise TimeoutError(timeout_msg)
-                return
+                self.kernel_client.hb_channel.kernel_died.disconnect(
+                    wait_loop.quit)
+                if condition():
+                    return
+                if not self.kernel_client.is_alive():
+                    raise RuntimeError("Kernel is dead")
+                raise TimeoutError(timeout_msg)
             wait_loop.exec_()
 
         wait_timeout.stop()
         signal.disconnect(wait_loop.quit)
+        self.kernel_client.hb_channel.kernel_died.disconnect(
+            wait_loop.quit)
 
     def _handle_remote_call_reply(self, msg_dict, buffer):
         """
@@ -185,4 +242,6 @@ class KernelComm(CommBase, QObject):
         Handle an error that was raised on the other side and sent back.
         """
         for line in error_wrapper.format_error():
-            self.sig_exception_occurred.emit(line, True)
+            self.sig_exception_occurred.emit(
+                dict(text=line, is_traceback=True)
+            )

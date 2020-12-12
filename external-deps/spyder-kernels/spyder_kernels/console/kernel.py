@@ -11,14 +11,22 @@ Spyder kernel for Jupyter.
 """
 
 # Standard library imports
+from distutils.version import LooseVersion
 import os
 import sys
+import threading
 
 # Third-party imports
+import ipykernel
 from ipykernel.ipkernel import IPythonKernel
+from ipykernel.zmqshell import ZMQInteractiveShell
 
 # Local imports
+from spyder_kernels.py3compat import TEXT_TYPES, to_text_string
 from spyder_kernels.comms.frontendcomm import FrontendComm
+from spyder_kernels.py3compat import PY3, input
+from spyder_kernels.utils.misc import (
+    MPL_BACKENDS_FROM_SPYDER, MPL_BACKENDS_TO_SPYDER, INLINE_FIGURE_FORMATS)
 
 
 # Excluded variables from the Variable Explorer (i.e. they are not
@@ -26,8 +34,31 @@ from spyder_kernels.comms.frontendcomm import FrontendComm
 EXCLUDED_NAMES = ['In', 'Out', 'exit', 'get_ipython', 'quit']
 
 
+class SpyderShell(ZMQInteractiveShell):
+    """Spyder shell."""
+
+    def ask_exit(self):
+        """Engage the exit actions."""
+        self.kernel.frontend_comm.close_thread()
+        return super(SpyderShell, self).ask_exit()
+
+    def get_local_scope(self, stack_depth):
+        """Get local scope at given frame depth."""
+        frame = sys._getframe(stack_depth + 1)
+        if self.kernel._pdb_frame is frame:
+            # we also give the globals because they might not be in
+            # self.user_ns
+            namespace = frame.f_globals.copy()
+            namespace.update(self.kernel._pdb_locals)
+            return namespace
+        else:
+            return frame.f_locals
+
+
 class SpyderKernel(IPythonKernel):
     """Spyder kernel for Jupyter."""
+
+    shell_class = SpyderShell
 
     def __init__(self, *args, **kwargs):
         super(SpyderKernel, self).__init__(*args, **kwargs)
@@ -39,6 +70,7 @@ class SpyderKernel(IPythonKernel):
             'set_breakpoints': self.set_spyder_breakpoints,
             'set_pdb_ignore_lib': self.set_pdb_ignore_lib,
             'set_pdb_execute_events': self.set_pdb_execute_events,
+            'set_pdb_use_exclamation_mark': self.set_pdb_use_exclamation_mark,
             'get_value': self.get_value,
             'load_data': self.load_data,
             'save_namespace': self.save_namespace,
@@ -58,24 +90,27 @@ class SpyderKernel(IPythonKernel):
             'set_namespace_view_settings': self.set_namespace_view_settings,
             'get_var_properties': self.get_var_properties,
             'set_sympy_forecolor': self.set_sympy_forecolor,
-            'set_pdb_echo_code': self.set_pdb_echo_code,
             'update_syspath': self.update_syspath,
-            'is_special_kernel_valid': self.is_special_kernel_valid
+            'is_special_kernel_valid': self.is_special_kernel_valid,
+            'get_matplotlib_backend': self.get_matplotlib_backend,
+            'pdb_input_reply': self.pdb_input_reply,
+            '_interrupt_eventloop': self._interrupt_eventloop,
             }
         for call_id in handlers:
             self.frontend_comm.register_call_handler(
                 call_id, handlers[call_id])
 
         self.namespace_view_settings = {}
-
         self._pdb_obj = None
         self._pdb_step = None
-        self._pdb_print_code = True
         self._do_publish_pdb_state = True
         self._mpl_backend_error = None
         self._running_namespace = None
+        self._pdb_input_line = None
 
-    def frontend_call(self, blocking=False, broadcast=True, timeout=None):
+    # -- Public API -----------------------------------------------------------
+    def frontend_call(self, blocking=False, broadcast=True,
+                      timeout=None, callback=None):
         """Call the frontend."""
         # If not broadcast, send only to the calling comm
         if broadcast:
@@ -86,77 +121,9 @@ class SpyderKernel(IPythonKernel):
         return self.frontend_comm.remote_call(
             blocking=blocking,
             comm_id=comm_id,
+            callback=callback,
             timeout=timeout)
 
-    @property
-    def _pdb_frame(self):
-        """Return current Pdb frame if there is any"""
-        if self._pdb_obj is not None and self._pdb_obj.curframe is not None:
-            return self._pdb_obj.curframe
-
-    @property
-    def _pdb_locals(self):
-        """
-        Return current Pdb frame locals if available. Otherwise
-        return an empty dictionary
-        """
-        if self._pdb_frame:
-            return self._pdb_obj.curframe_locals
-        else:
-            return {}
-
-    def set_spyder_breakpoints(self, breakpoints):
-        """
-        Handle a message from the frontend
-        """
-        if self._pdb_obj:
-            self._pdb_obj.set_spyder_breakpoints(breakpoints)
-
-    def set_pdb_echo_code(self, state):
-        """Set if pdb should echo the code.
-
-        This might change for each pdb statment and is therefore not included
-        in pdb settings.
-        """
-        self._pdb_print_code = state
-
-    def set_pdb_ignore_lib(self, state):
-        """
-        Change the "Ignore libraries while stepping" debugger setting.
-        """
-        if self._pdb_obj:
-            self._pdb_obj.pdb_ignore_lib = state
-
-    def set_pdb_execute_events(self, state):
-        """
-        Handle a message from the frontend
-        """
-        if self._pdb_obj:
-            self._pdb_obj.pdb_execute_events = state
-
-    def update_syspath(self, path_dict, new_path_dict):
-        """
-        Update the PYTHONPATH of the kernel.
-
-        `path_dict` and `new_path_dict` have the paths as keys and the state
-        as values. The state is `True` for active and `False` for inactive.
-
-        `path_dict` corresponds to the previous state of the PYTHONPATH.
-        `new_path_dict` corresponds to the new state of the PYTHONPATH.
-        """
-        # Remove old paths
-        for path in path_dict:
-            while path in sys.path:
-                sys.path.remove(path)
-
-        # Add new paths
-        # We do this in reverse order as we use `sys.path.insert(1, path)`.
-        # This ensures the end result has the correct path order.
-        for path, active in reversed(new_path_dict.items()):
-            if active:
-                sys.path.insert(1, path)
-
-    # -- Public API ---------------------------------------------------
     # --- For the Variable Explorer
     def set_namespace_view_settings(self, settings):
         """Set namespace_view_settings."""
@@ -322,15 +289,94 @@ class SpyderKernel(IPythonKernel):
             self.frontend_call(blocking=False).pdb_state(state)
         self._do_publish_pdb_state = True
 
-    def pdb_continue(self):
+    def set_spyder_breakpoints(self, breakpoints):
         """
-        Tell the console to run 'continue' after entering a
-        Pdb session to get to the first breakpoint.
-
-        Fixes issue 2034
+        Handle a message from the frontend
         """
         if self._pdb_obj:
-            self.frontend_call(blocking=False).pdb_continue()
+            self._pdb_obj.set_spyder_breakpoints(breakpoints)
+
+    def set_pdb_ignore_lib(self, state):
+        """
+        Change the "Ignore libraries while stepping" debugger setting.
+        """
+        if self._pdb_obj:
+            self._pdb_obj.pdb_ignore_lib = state
+
+    def set_pdb_execute_events(self, state):
+        """
+        Handle a message from the frontend
+        """
+        if self._pdb_obj:
+            self._pdb_obj.pdb_execute_events = state
+
+    def set_pdb_use_exclamation_mark(self, state):
+        """
+        Set an option on the current debugging session to decide wether
+        the Pdb commands needs to be prefixed by '!'
+        """
+        if self._pdb_obj:
+            self._pdb_obj.pdb_use_exclamation_mark = state
+
+    def pdb_input_reply(self, line, echo_stack_entry=True):
+        """Get a pdb command from the frontend."""
+        if self._pdb_obj:
+            self._pdb_obj._disable_next_stack_entry = not echo_stack_entry
+        self._pdb_input_line = line
+        if self.eventloop:
+            # Interrupting the eventloop is only implemented when a message is
+            # received on the shell channel, but this message is queued and
+            # won't be processed because an `execute` message is being
+            # processed. Therefore we process the message here (comm channel)
+            # and request a dummy message to be sent on the shell channel to
+            # stop the eventloop. This will call back `_interrupt_eventloop`.
+            self.frontend_call().request_interrupt_eventloop()
+
+    def cmd_input(self, prompt=''):
+        """
+        Special input function for commands.
+        Runs the eventloop while debugging.
+        """
+        # Only works if the comm is open and this is a pdb prompt.
+        if not self.frontend_comm.is_open() or not self._pdb_frame:
+            return input(prompt)
+
+        # Flush output before making the request.
+        sys.stderr.flush()
+        sys.stdout.flush()
+
+        # Send the input request.
+        self._pdb_input_line = None
+        self.frontend_call().pdb_input(prompt)
+
+        # Allow GUI event loop to update
+        if PY3:
+            is_main_thread = (
+                threading.current_thread() is threading.main_thread())
+        else:
+            is_main_thread = isinstance(
+                threading.current_thread(), threading._MainThread)
+
+        # Get input by running eventloop
+        if is_main_thread and self.eventloop:
+            while self._pdb_input_line is None:
+                eventloop = self.eventloop
+                if eventloop:
+                    eventloop(self)
+                else:
+                    break
+
+        # Get input by blocking
+        if self._pdb_input_line is None:
+            self.frontend_comm.wait_until(
+                lambda: self._pdb_input_line is not None)
+
+        return self._pdb_input_line
+
+    def _interrupt_eventloop(self):
+        """Interrupts the eventloop."""
+        # Receiving the request is enough to stop the eventloop.
+        pass
 
     # --- For the Help plugin
     def is_defined(self, obj, force_import=False):
@@ -361,6 +407,71 @@ class SpyderKernel(IPythonKernel):
         if valid:
             return getsource(obj)
 
+    # -- For Matplolib
+    def get_matplotlib_backend(self):
+        """Get current matplotlib backend."""
+        try:
+            import matplotlib
+            return MPL_BACKENDS_TO_SPYDER[matplotlib.get_backend()]
+        except Exception:
+            return None
+
+    def set_matplotlib_backend(self, backend, pylab=False):
+        """Set matplotlib backend given a Spyder backend option."""
+        mpl_backend = MPL_BACKENDS_FROM_SPYDER[to_text_string(backend)]
+        self._set_mpl_backend(mpl_backend, pylab=pylab)
+
+    def set_mpl_inline_figure_format(self, figure_format):
+        """Set the inline figure format to use with matplotlib."""
+        mpl_figure_format = INLINE_FIGURE_FORMATS[figure_format]
+        self._set_config_option(
+            'InlineBackend.figure_format', mpl_figure_format)
+
+    def set_mpl_inline_resolution(self, resolution):
+        """Set inline figure resolution."""
+        if LooseVersion(ipykernel.__version__) < LooseVersion('4.5'):
+            option = 'savefig.dpi'
+        else:
+            option = 'figure.dpi'
+        self._set_mpl_inline_rc_config(option, resolution)
+
+    def set_mpl_inline_figure_size(self, width, height):
+        """Set inline figure size."""
+        value = (width, height)
+        self._set_mpl_inline_rc_config('figure.figsize', value)
+
+    def set_mpl_inline_bbox_inches(self, bbox_inches):
+        """
+        Set inline print figure bbox inches.
+
+        The change is done by updating the ´rint_figure_kwargs' config dict.
+        """
+        from IPython.core.getipython import get_ipython
+        config = get_ipython().kernel.config
+        inline_config = (
+            config['InlineBackend'] if 'InlineBackend' in config else {})
+        print_figure_kwargs = (
+            inline_config['print_figure_kwargs']
+            if 'print_figure_kwargs' in inline_config else {})
+        bbox_inches_dict = {
+            'bbox_inches': 'tight' if bbox_inches else None}
+        print_figure_kwargs.update(bbox_inches_dict)
+        self._set_config_option(
+            'InlineBackend.print_figure_kwargs', print_figure_kwargs)
+
+    # -- For completions
+    def set_jedi_completer(self, use_jedi):
+        """Enable/Disable jedi as the completer for the kernel."""
+        self._set_config_option('IPCompleter.use_jedi', use_jedi)
+
+    def set_greedy_completer(self, use_greedy):
+        """Enable/Disable greedy completer for the kernel."""
+        self._set_config_option('IPCompleter.greedy', use_greedy)
+
+    def set_autocall(self, autocall):
+        """Enable/Disable autocall funtionality."""
+        self._set_config_option('ZMQInteractiveShell.autocall', autocall)
+
     # --- Additional methods
     def set_cwd(self, dirname):
         """Set current working directory."""
@@ -368,7 +479,10 @@ class SpyderKernel(IPythonKernel):
 
     def get_cwd(self):
         """Get current working directory."""
-        return os.getcwd()
+        try:
+            return os.getcwd()
+        except (IOError, OSError):
+            pass
 
     def get_syspath(self):
         """Return sys.path contents."""
@@ -408,6 +522,28 @@ class SpyderKernel(IPythonKernel):
             elif os.environ.get('SPY_RUN_CYTHON') == 'True':
                 return u'cython'
         return None
+
+    def update_syspath(self, path_dict, new_path_dict):
+        """
+        Update the PYTHONPATH of the kernel.
+
+        `path_dict` and `new_path_dict` have the paths as keys and the state
+        as values. The state is `True` for active and `False` for inactive.
+
+        `path_dict` corresponds to the previous state of the PYTHONPATH.
+        `new_path_dict` corresponds to the new state of the PYTHONPATH.
+        """
+        # Remove old paths
+        for path in path_dict:
+            while path in sys.path:
+                sys.path.remove(path)
+
+        # Add new paths
+        # We do this in reverse order as we use `sys.path.insert(1, path)`.
+        # This ensures the end result has the correct path order.
+        for path, active in reversed(new_path_dict.items()):
+            if active:
+                sys.path.insert(1, path)
 
     # -- Private API ---------------------------------------------------
     # --- For the Variable Explorer
@@ -527,6 +663,23 @@ class SpyderKernel(IPythonKernel):
         """Register Pdb session to use it later"""
         self._pdb_obj = pdb_obj
 
+    @property
+    def _pdb_frame(self):
+        """Return current Pdb frame if there is any"""
+        if self._pdb_obj is not None and self._pdb_obj.curframe is not None:
+            return self._pdb_obj.curframe
+
+    @property
+    def _pdb_locals(self):
+        """
+        Return current Pdb frame locals if available. Otherwise
+        return an empty dictionary
+        """
+        if self._pdb_frame:
+            return self._pdb_obj.curframe_locals
+        else:
+            return {}
+
     # --- For the Help plugin
     def _eval(self, text):
         """
@@ -550,6 +703,8 @@ class SpyderKernel(IPythonKernel):
 
         backend: A parameter that can be passed to %matplotlib
                  (e.g. 'inline' or 'tk').
+        pylab: Is the pylab magic should be used in order to populate the
+               namespace from numpy and matplotlib
         """
         import traceback
         from IPython.core.getipython import get_ipython
@@ -591,6 +746,37 @@ class SpyderKernel(IPythonKernel):
             error = generic_error.format(traceback.format_exc())
 
         self._mpl_backend_error = error
+
+    def _set_config_option(self, option, value):
+        """
+        Set config options using the %config magic.
+
+        As parameters:
+            option: config option, for example 'InlineBackend.figure_format'.
+            value: value of the option, for example 'SVG', 'Retina', etc.
+        """
+        from IPython.core.getipython import get_ipython
+        try:
+            base_config = "{option} = "
+            value_line = (
+                "'{value}'" if isinstance(value, TEXT_TYPES) else "{value}")
+            config_line = base_config + value_line
+            get_ipython().run_line_magic(
+                'config',
+                config_line.format(option=option, value=value))
+        except Exception:
+            pass
+
+    def _set_mpl_inline_rc_config(self, option, value):
+        """
+        Update any of the Matplolib rcParams given an option and value.
+        """
+        try:
+            from matplotlib import rcParams
+            rcParams[option] = value
+        except Exception:
+            # Needed in case matplolib isn't installed
+            pass
 
     def show_mpl_backend_errors(self):
         """Show Matplotlib backend errors after the prompt is ready."""

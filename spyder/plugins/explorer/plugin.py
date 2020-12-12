@@ -15,6 +15,7 @@
 import os.path as osp
 
 # Third party imports
+from qtpy.QtCore import Signal
 from qtpy.QtWidgets import QVBoxLayout
 
 # Local imports
@@ -30,6 +31,25 @@ class Explorer(SpyderPluginWidget):
     CONF_SECTION = 'explorer'
     CONFIGWIDGET_CLASS = ExplorerConfigPage
     CONF_FILE = False
+    DISABLE_ACTIONS_WHEN_HIDDEN = False
+
+    # --- Signals
+    # ------------------------------------------------------------------------
+    sig_dir_opened = Signal(str)
+    """
+    This signal is emitted when the current directory of the explorer tree
+    has changed.
+
+    Parameters
+    ----------
+    new_root_directory: str
+        The new root directory path.
+
+    Notes
+    -----
+    This happens when clicking (or double clicking depending on the option)
+    a folder, turning this folder in the new root parent of the tree.
+    """
 
     def __init__(self, parent=None):
         """Initialization."""
@@ -40,8 +60,7 @@ class Explorer(SpyderPluginWidget):
         self.fileexplorer = ExplorerWidget(
             self,
             name_filters=self.get_option('name_filters'),
-            show_all=self.get_option('show_all'),
-            show_icontext=self.get_option('show_icontext'),
+            show_hidden=self.get_option('show_hidden'),
             options_button=self.options_button,
             single_click_to_open=self.get_option('single_click_to_open'),
             file_associations=self.get_option('file_associations',
@@ -62,18 +81,18 @@ class Explorer(SpyderPluginWidget):
     def get_plugin_title(self):
         """Return widget title"""
         return _("Files")
-    
+
     def get_focus_widget(self):
         """
         Return the widget to give focus to when
         this plugin's dockwidget is raised on top-level
         """
         return self.fileexplorer.treewidget
-    
+
     def get_plugin_actions(self):
         """Return a list of actions related to plugin"""
         return self.fileexplorer.treewidget.common_actions
-    
+
     def register_plugin(self):
         """Register plugin in Spyder's main window"""
         ipyconsole = self.main.ipyconsole
@@ -98,19 +117,8 @@ class Explorer(SpyderPluginWidget):
             lambda fname:
             ipyconsole.run_script(fname, osp.dirname(fname), '', False, False,
                                   False, True, False))
-        treewidget.sig_open_dir.connect(
-            lambda dirname:
-            self.main.workingdirectory.chdir(dirname,
-                                             refresh_explorer=False,
-                                             refresh_console=True))
 
-        self.main.editor.open_dir.connect(self.chdir)
-
-        # Signal "set_explorer_cwd(QString)" will refresh only the
-        # contents of path passed by the signal in explorer:
-        self.main.workingdirectory.set_explorer_cwd.connect(
-                     lambda directory: self.refresh_plugin(new_path=directory,
-                                                           force_current=True))
+        treewidget.sig_dir_opened.connect(self.sig_dir_opened)
 
     def refresh_plugin(self, new_path=None, force_current=True):
         """Refresh explorer widget"""
@@ -133,10 +141,8 @@ class Explorer(SpyderPluginWidget):
                 self.fileexplorer.treewidget.set_single_click_to_open,
             'name_filters':
                 self.fileexplorer.treewidget.set_name_filters,
-            'show_all':
-                self.fileexplorer.treewidget.toggle_all,
-            'show_icontext':
-                self.fileexplorer.toggle_icontext,
+            'show_hidden':
+                self.fileexplorer.treewidget.toggle_hidden
         }
         for option in options:
             if option in method_map:
@@ -145,7 +151,18 @@ class Explorer(SpyderPluginWidget):
                 method(value)
         self.fileexplorer.treewidget.update_common_actions()
 
-    #------ Public API ---------------------------------------------------------
-    def chdir(self, directory):
-        """Set working directory"""
-        self.fileexplorer.treewidget.chdir(directory)
+    # --- Public API
+    # ------------------------------------------------------------------------
+    def chdir(self, directory, emit=True):
+        """
+        Set working directory.
+
+        Parameters
+        ----------
+        directory: str
+            The new working directory path.
+        emit: bool, optional
+            Emit a signal to indicate the working directory has changed.
+            Default is True.
+        """
+        self.fileexplorer.treewidget.chdir(directory, emit=emit)

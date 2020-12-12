@@ -334,6 +334,8 @@ class DataFrameModel(QAbstractTableModel):
         QAbstractTableModel.__init__(self)
         self.dialog = parent
         self.df = dataFrame
+        self.df_columns_list = None
+        self.df_index_list = None
         self.original_df = dataFrame.copy()
         self.idx_tracker = None
         self._INDEX_TRACKER_NAME = '__INDEX_TRACKER'
@@ -381,6 +383,21 @@ class DataFrameModel(QAbstractTableModel):
         """
         return self.df.columns if axis == 0 else self.df.index
 
+    def _axis_list(self, axis):
+        """
+        Return the corresponding labels as a list taking into account the axis.
+
+        The axis could be horizontal (0) or vertical (1).
+        """
+        if axis == 0:
+            if self.df_columns_list is None:
+                self.df_columns_list = self.df.columns.tolist()
+            return self.df_columns_list
+        else:
+            if self.df_index_list is None:
+                self.df_index_list = self.df.index.tolist()
+            return self.df_index_list
+
     def _axis_levels(self, axis):
         """
         Return the number of levels in the labels taking into account the axis.
@@ -413,10 +430,11 @@ class DataFrameModel(QAbstractTableModel):
         given level.
         """
         ax = self._axis(axis)
-        # slow if using tolist on DatetimeIndex
-        values = ax.values[x] if isinstance(ax, pd.DatetimeIndex) else ax.tolist()[x]
-        return values if not hasattr(ax, 'levels') \
-            else ax.values[x][level]
+        if not hasattr(ax, 'levels'):
+            ax = self._axis_list(axis)
+            return ax[x]
+        else:
+            return ax.values[x][level]
 
     def name(self, axis, level):
         """Return the labels of the levels if any."""
@@ -687,6 +705,10 @@ class DataFrameModel(QAbstractTableModel):
                          "an error ocurred while trying to do it")
         return to_qvariant()
 
+    def recalculate_index(self):
+        """Recalcuate index information."""
+        self.df_index_list = self.df.index.tolist()
+
     def sort(self, column, order=Qt.AscendingOrder):
         """Overriding sort method"""
         if self.complex_intran is not None:
@@ -719,6 +741,8 @@ class DataFrameModel(QAbstractTableModel):
                     QMessageBox.critical(self.dialog, "Error",
                                          "SystemError: %s" % to_text_string(e))
             else:
+                # Update index list
+                self.recalculate_index()
                 # To sort by index
                 self.df.sort_index(inplace=True, ascending=ascending)
         except TypeError as e:
@@ -1010,7 +1034,6 @@ class DataFrameView(QTableView):
             self.header_class.setSortIndicatorShown(True)
             # the arrow in header
         sort_order = self.header_class.sortIndicatorOrder()
-        self.sig_sort_by_column.emit()
         if not self.model().sort(index, sort_order):
             if len(self.sort_old) != 2:
                 self.header_class.setSortIndicatorShown(False)
@@ -1019,6 +1042,7 @@ class DataFrameView(QTableView):
                                                    self.sort_old[1])
             return
         self.sort_old = [index, self.header_class.sortIndicatorOrder()]
+        self.sig_sort_by_column.emit()
         self.sig_reset_sort_indicator.emit()
 
     def _reset_sort_indicator(self):
@@ -1911,6 +1935,8 @@ class DataFrameEditor(BaseDialog):
 
         Uses the model of the dataTable as the base.
         """
+        # Update index list calculation
+        self.dataModel.recalculate_index()
         self.setModel(self.dataTable.model())
 
     def _fetch_more_columns(self):
