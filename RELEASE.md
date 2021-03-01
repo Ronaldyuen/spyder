@@ -55,11 +55,24 @@ To release a new version of Spyder you need to follow these steps:
       git add .
       git commit --amend --no-edit
 
+* Push your changes to the translation PR with
+
+      git push -f upstream translate/<branch-name>
+
 * Rename the PR title to be `PR: Update translations from Crowdin`.
 
 * Merge the PR.
 
 * Don't forget to remove your local checkout of `translate/<branch-name>` because that's going to be outdated for next time.
+
+* Update the `master` branch with
+
+      git checkout 4.x
+      git fetch upstream
+      git merge upstream/4.x
+      git checkout master
+      git merge 4.x
+      Merge from 4.x: PR #xxxxx
 
 ### Update core dependencies
 
@@ -67,12 +80,20 @@ To release a new version of Spyder you need to follow these steps:
 
 * Release a new version of `python-language-server`, if required.
 
-* Create a new branch in Spyder with the name `update-core-deps`
+* Create a new branch in your fork with the name `update-core-deps`
 
-* Update the versions of those packages in the following files
+* In case a new version is not part of the `defaults` channel yet, you need to copy it to our channel with the following command:
+
+      anaconda copy conda-forge/pyls-spyder/0.3.2 --to-label dev --to-owner spyder-ide
+
+  *Note*: For this you need to install first the `anaconda-client` package in your `base` environment and open an account in https://anaconda.org/
+
+* Update the version of any packages required before the release in the following files:
 
   - `setup.py`
   - `spyder/dependencies.py`
+  - `requirements/conda.txt`
+  - `binder/environment.yml`
   - `spyder/plugins/ipythonconsole/plugin.py`
 
 * Commit with
@@ -80,11 +101,12 @@ To release a new version of Spyder you need to follow these steps:
       git add .
       git commit -m "Update core dependencies"
 
-* Update their respective subrepos with the following commands, but only if new versions are available!
+* Update our subrepos with the following commands, but only if new versions are available!
 
       git subrepo pull external-deps/spyder-kernels
       git subrepo pull external-deps/python-language-server
 
+* Merge this PR following the procedure mentioned on `MAINTENANCE.md`
 
 ## To do the release
 
@@ -96,11 +118,11 @@ To release a new version of Spyder you need to follow these steps:
 
 * Add sections for `New features` and `Important fixes` in CHANGELOG.md. For this take a look at closed issues and PRs for the current milestone.
 
-* `git commit -m "Update Changelog"`
+* `git add .` and `git commit -m "Update Changelog"`
 
 * Update Announcements.md (this goes to our Google group)
 
-* `git commit -m "Update Announcements"`
+* `git add .` and `git commit -m "Update Announcements"`
 
 * `git clean -xfdi` and select option `1`.
 
@@ -119,6 +141,8 @@ To release a new version of Spyder you need to follow these steps:
 * twine check dist/*
 
 * twine upload dist/*
+
+* Check in PyPI that the new release was published correctly
 
 * git tag -a vX.X.X -m 'Release X.X.X'
 
@@ -166,5 +190,3 @@ To release a new version of Spyder you need to follow these steps:
 
     https://github.com/spyder-ide/spyder/blob/4.x/requirements/conda.txt
   - After merging, give a ping to `@anaconda-pkg-build` about the new release.
-
-* Don't forget to yank 4.2.0 in PyPI after 4.2.1 was released (and remove this instruction). That's to avoid people installing 4.2.0 in Python 2 envs.

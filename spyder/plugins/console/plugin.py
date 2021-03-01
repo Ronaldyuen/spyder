@@ -19,7 +19,10 @@ from qtpy.QtGui import QIcon
 # Local imports
 from spyder.api.plugins import Plugins, SpyderDockablePlugin
 from spyder.api.translations import get_translation
+from spyder.plugins.application.plugin import ApplicationActions
 from spyder.plugins.console.widgets.main_widget import ConsoleWidget
+from spyder.plugins.mainmenu.api import (
+    ApplicationMenus, FileMenuSections, HelpMenuSections)
 
 # Localization
 _ = get_translation('spyder')
@@ -34,6 +37,7 @@ class Console(SpyderDockablePlugin):
     """
     NAME = 'internal_console'
     WIDGET_CLASS = ConsoleWidget
+    OPTIONAL = [Plugins.MainMenu]
     CONF_SECTION = NAME
     CONF_FILE = False
     CONF_FROM_OPTIONS = {
@@ -86,6 +90,7 @@ class Console(SpyderDockablePlugin):
 
     def register(self):
         widget = self.get_widget()
+        mainmenu = self.get_plugin(Plugins.MainMenu)
 
         # Signals
         widget.sig_edit_goto_requested.connect(self.sig_edit_goto_requested)
@@ -112,6 +117,13 @@ class Console(SpyderDockablePlugin):
             )
             widget.handle_exception(error_data)
 
+        # Actions
+        if mainmenu:
+            mainmenu.add_item_to_application_menu(
+                widget.quit_action,
+                menu_id=ApplicationMenus.File,
+                section=FileMenuSections.Restart)
+
     def update_font(self):
         font = self.get_font()
         self.get_widget().set_font(font)
@@ -120,8 +132,16 @@ class Console(SpyderDockablePlugin):
         self.get_widget().dialog_manager.close_all()
         return True
 
+    def on_mainwindow_visible(self):
+        self.set_exit_function(self.main.closing)
+
     # --- API
     # ------------------------------------------------------------------------
+    @Slot()
+    def report_issue(self):
+        """Report an issue with the SpyderErrorDialog."""
+        self.get_widget().report_issue()
+
     @property
     def error_dialog(self):
         """

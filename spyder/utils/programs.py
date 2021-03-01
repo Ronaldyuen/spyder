@@ -278,26 +278,6 @@ def run_program(program, args=None, **subprocess_kwargs):
     return subprocess.Popen(fullcmd, **subprocess_kwargs)
 
 
-def start_file(filename):
-    """
-    Generalized os.startfile for all platforms supported by Qt
-
-    This function is simply wrapping QDesktopServices.openUrl
-
-    Returns True if successful, otherwise returns False.
-    """
-    from qtpy.QtCore import QUrl
-    from qtpy.QtGui import QDesktopServices
-
-    # We need to use setUrl instead of setPath because this is the only
-    # cross-platform way to open external files. setPath fails completely on
-    # Mac and doesn't open non-ascii files on Linux.
-    # Fixes spyder-ide/spyder#740.
-    url = QUrl()
-    url.setUrl(filename)
-    return QDesktopServices.openUrl(url)
-
-
 def parse_linux_desktop_entry(fpath):
     """Load data from desktop entry with xdg specification."""
     from xdg.DesktopEntry import DesktopEntry
@@ -944,9 +924,14 @@ def is_module_installed(module_name, version=None, interpreter=None):
             # Module is not installed
             return False
 
-        # This can happen if a package was not uninstalled correctly
-        if module_version is None:
-            return False
+        # This can happen if a package was not uninstalled correctly. For
+        # instance, if it's __pycache__ main directory is left behind.
+        try:
+            mod = __import__(module_name)
+            if not getattr(mod, '__file__', None):
+                return False
+        except Exception:
+            pass
 
     if version is None:
         return True

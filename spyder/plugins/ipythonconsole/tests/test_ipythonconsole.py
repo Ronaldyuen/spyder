@@ -715,12 +715,9 @@ def test_save_history_dbg(ipyconsole, qtbot):
     control = ipyconsole.get_focus_widget()
     control.setFocus()
 
-    # Generate a traceback and enter debugging mode
+    # Enter debugging mode
     with qtbot.waitSignal(shell.executed):
-        shell.execute('1/0')
-
-    with qtbot.waitSignal(shell.executed):
-        shell.execute('%debug')
+        shell.execute('%debug print()')
 
     # Enter an expression
     with qtbot.waitSignal(shell.executed):
@@ -760,12 +757,9 @@ def test_save_history_dbg(ipyconsole, qtbot):
     control = ipyconsole.get_focus_widget()
     control.setFocus()
 
-    # Generate a traceback and enter debugging mode
+    # Enter debugging mode
     with qtbot.waitSignal(shell.executed):
-        shell.execute('1/0')
-
-    with qtbot.waitSignal(shell.executed):
-        shell.execute('%debug')
+        shell.execute('%debug print()')
 
     # Press Up arrow button and assert we get the last
     # introduced command
@@ -876,11 +870,9 @@ def test_values_dbg(ipyconsole, qtbot):
     control = ipyconsole.get_focus_widget()
     control.setFocus()
 
-    # Generate a traceback and enter debugging mode
+    # Enter debugging mode
     with qtbot.waitSignal(shell.executed):
-        shell.execute('1/0')
-    with qtbot.waitSignal(shell.executed):
-        shell.execute('%debug')
+        shell.execute('%debug print()')
 
     # Get value
     with qtbot.waitSignal(shell.executed):
@@ -932,11 +924,9 @@ def test_execute_events_dbg(ipyconsole, qtbot):
     with qtbot.waitSignal(shell.executed):
         shell.execute('import matplotlib.pyplot as plt')
 
-    # Generate a traceback and enter debugging mode
+    # Enter debugging mode
     with qtbot.waitSignal(shell.executed):
-        shell.execute('1/0')
-    with qtbot.waitSignal(shell.executed):
-        shell.execute('%debug')
+        shell.execute('%debug print()')
 
     # Set processing events to True
     CONF.set('ipython_console', 'pdb_execute_events', True)
@@ -1051,12 +1041,9 @@ def test_ctrl_c_dbg(ipyconsole, qtbot):
     control = ipyconsole.get_focus_widget()
     control.setFocus()
 
-    # Generate a traceback and enter debugging mode
+    # Enter debugging mode
     with qtbot.waitSignal(shell.executed):
-        shell.execute('1/0')
-
-    with qtbot.waitSignal(shell.executed):
-        shell.execute('%debug')
+        shell.execute('%debug print()')
 
     # Test Ctrl+C
     qtbot.keyClick(control, Qt.Key_C, modifier=Qt.ControlModifier)
@@ -1080,12 +1067,9 @@ def test_clear_and_reset_magics_dbg(ipyconsole, qtbot):
     control = ipyconsole.get_focus_widget()
     control.setFocus()
 
-    # Generate a traceback and enter debugging mode
+    # Enter debugging mode
     with qtbot.waitSignal(shell.executed):
-        shell.execute('1/0')
-
-    with qtbot.waitSignal(shell.executed):
-        shell.execute('%debug')
+        shell.execute('%debug print()')
 
     # Test clear magic
     shell.clear_console()
@@ -1412,12 +1396,9 @@ def test_console_complete(ipyconsole, qtbot, tmpdir):
     qtbot.keyClick(shell._completion_widget, Qt.Key_Enter)
     qtbot.waitUntil(lambda: control.toPlainText().split()[-1] == 'cbba')
 
-    # Generate a traceback and enter debugging mode
+    # Enter debugging mode
     with qtbot.waitSignal(shell.executed):
-        shell.execute('1/0')
-
-    with qtbot.waitSignal(shell.executed):
-        shell.execute('%debug')
+        shell.execute('%debug print()')
 
     # Test complete in debug mode
     # check abs is completed twice (as the cursor moves)
@@ -1532,7 +1513,7 @@ def test_pdb_multiline(ipyconsole, qtbot):
     qtbot.wait(500)
 
     assert shell.get_value('bb') == 10
-    assert "if True:\n   ...:     bb = 10\n" in control.toPlainText()
+    assert "if True:\n     ...:     bb = 10\n" in control.toPlainText()
 
 
 @flaky(max_runs=3)
@@ -1798,27 +1779,6 @@ def test_pdb_eventloop(ipyconsole, qtbot, backend):
 
 
 @flaky(max_runs=3)
-def test_pdb_without_comm(ipyconsole, qtbot):
-    """Check if pdb works without comm."""
-    shell = ipyconsole.get_current_shellwidget()
-    qtbot.waitUntil(lambda: shell._prompt_html is not None,
-                    timeout=SHELL_TIMEOUT)
-    control = ipyconsole.get_focus_widget()
-
-    with qtbot.waitSignal(shell.executed):
-        shell.execute("get_ipython().kernel.frontend_comm.close()")
-    shell.execute("%debug print()")
-    qtbot.waitUntil(
-        lambda: shell._control.toPlainText().split()[-1] == 'ipdb>')
-    qtbot.keyClicks(control, "print('Two: ' + str(1+1))")
-    qtbot.keyClick(control, Qt.Key_Enter)
-    qtbot.waitUntil(
-        lambda: shell._control.toPlainText().split()[-1] == 'ipdb>')
-
-    assert "Two: 2" in control.toPlainText()
-
-
-@flaky(max_runs=3)
 def test_recursive_pdb(ipyconsole, qtbot):
     """Check commands and code are separted."""
     shell = ipyconsole.get_current_shellwidget()
@@ -1844,7 +1804,7 @@ def test_recursive_pdb(ipyconsole, qtbot):
     # quit one layer
     with qtbot.waitSignal(shell.executed):
         shell.pdb_execute("!quit")
-    assert control.toPlainText().split()[-2:] == ["(IPdb", "[1]):"]
+    assert control.toPlainText().split()[-2:] == ["(IPdb", "[2]):"]
     # Check completion works
     qtbot.keyClicks(control, 'aba')
     qtbot.keyClick(control, Qt.Key_Tab)
@@ -1853,7 +1813,7 @@ def test_recursive_pdb(ipyconsole, qtbot):
     # quit one layer
     with qtbot.waitSignal(shell.executed):
         shell.pdb_execute("!quit")
-    assert control.toPlainText().split()[-2:] == ["IPdb", "[1]:"]
+    assert control.toPlainText().split()[-2:] == ["IPdb", "[4]:"]
     # Check completion works
     qtbot.keyClicks(control, 'aba')
     qtbot.keyClick(control, Qt.Key_Tab)

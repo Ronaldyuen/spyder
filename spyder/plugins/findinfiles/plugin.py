@@ -12,12 +12,11 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication
 
 # Local imports
-from spyder.api.menus import ApplicationMenus
 from spyder.api.plugins import Plugins, SpyderDockablePlugin
-from spyder.api.toolbars import ApplicationToolBars
 from spyder.api.translations import get_translation
-from spyder.plugins.findinfiles.widgets import (FindInFilesWidget,
-                                                FindInFilesWidgetActions)
+from spyder.plugins.findinfiles.widgets import FindInFilesWidget
+from spyder.plugins.mainmenu.api import ApplicationMenus
+from spyder.plugins.toolbar.api import ApplicationToolbars
 from spyder.utils.misc import getcwd_or_home
 
 # Localization
@@ -37,7 +36,8 @@ class FindInFiles(SpyderDockablePlugin):
     Find in files DockWidget.
     """
     NAME = 'find_in_files'
-    OPTIONAL = [Plugins.Editor, Plugins.Projects, Plugins.WorkingDirectory]
+    REQUIRES = []
+    OPTIONAL = [Plugins.Editor, Plugins.Projects, Plugins.MainMenu]
     TABIFY = [Plugins.VariableExplorer]
     WIDGET_CLASS = FindInFilesWidget
     CONF_SECTION = NAME
@@ -56,22 +56,20 @@ class FindInFiles(SpyderDockablePlugin):
 
     def register(self):
         widget = self.get_widget()
+        mainmenu = self.get_plugin(Plugins.MainMenu)
         editor = self.get_plugin(Plugins.Editor)
         projects = self.get_plugin(Plugins.Projects)
-        working_directory = self.get_plugin(Plugins.WorkingDirectory)
 
         if editor:
-            widget.sig_edit_goto_requested.connect(editor.load)
+            widget.sig_edit_goto_requested.connect(
+                lambda filename, lineno, search_text, colno, colend: editor.load(
+                    filename, lineno, start_column=colno, end_column=colend))
             # TODO: improve name of signal open_file_update?
             editor.open_file_update.connect(self.set_current_opened_file)
 
         if projects:
             projects.sig_project_loaded.connect(self.set_project_path)
             projects.sig_project_closed.connect(self.unset_project_path)
-
-        if working_directory:
-            working_directory.sig_current_directory_changed.connect(
-                self.refresh_search_directory)
 
         findinfiles_action = self.create_action(
             FindInFilesActions.FindInFiles,
@@ -81,18 +79,14 @@ class FindInFiles(SpyderDockablePlugin):
             register_shortcut=True,
             context=Qt.WindowShortcut
         )
-        menu = self.get_application_menu(ApplicationMenus.Search)
-        self.add_item_to_application_menu(
-            findinfiles_action,
-            menu=menu,
-        )
 
-        search_toolbar = self.get_application_toolbar(
-            ApplicationToolBars.Search)
-        self.add_item_to_application_toolbar(
-            findinfiles_action,
-            search_toolbar,
-        )
+        if mainmenu:
+            menu = mainmenu.get_application_menu(ApplicationMenus.Search)
+            mainmenu.add_item_to_application_menu(
+                findinfiles_action,
+                menu=menu,
+            )
+
         self.refresh_search_directory()
 
     def on_close(self, cancelable=False):

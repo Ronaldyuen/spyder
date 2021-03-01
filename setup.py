@@ -28,7 +28,6 @@ import os
 import os.path as osp
 import subprocess
 import sys
-import shutil
 
 # Third party imports
 from setuptools import setup, find_packages
@@ -92,7 +91,9 @@ def get_data_files():
     """
     if sys.platform.startswith('linux'):
         data_files = [('share/applications', ['scripts/spyder.desktop']),
-                      ('share/icons', ['img_src/spyder.png'])]
+                      ('share/icons', ['img_src/spyder.png']),
+                      ('share/metainfo',
+                       ['scripts/org.spyder_ide.spyder.appdata.xml'])]
     elif os.name == 'nt':
         data_files = [('scripts', ['img_src/spyder.ico',
                                    'img_src/spyder_reset.ico'])]
@@ -223,9 +224,9 @@ install_requires = [
     'pylint>=1.0',
     'pyqt5<5.13',
     'pyqtwebengine<5.13',
-    'python-language-server[all]>=0.36.1,<1.0.0',
+    'python-language-server[all]>=0.36.2,<1.0.0',
     'pyls-black>=0.4.6',
-    'pyls-spyder>=0.1.1',
+    'pyls-spyder>=0.3.2',
     'pyxdg>=0.26;platform_system=="Linux"',
     'pyzmq>=17',
     'qdarkstyle>=2.8',
@@ -234,10 +235,10 @@ install_requires = [
     'qtpy>=1.5.0',
     'setuptools>=39.0.0',
     'sphinx>=0.6.6',
-    'spyder-kernels>=1.10.0,<1.11.0',
+    'spyder-kernels>=1.10.2,<1.11.0',
     'textdistance>=4.2.0',
     'three-merge>=0.1.1',
-    'watchdog>=0.10.3'
+    'watchdog>=0.10.3,<2.0.0'
 ]
 
 extras_require = {
@@ -266,33 +267,31 @@ extras_require = {
 
 spyder_plugins_entry_points = [
     'appearance = spyder.plugins.appearance.plugin:Appearance',
+    'application = spyder.plugins.application.plugin:Application',
     'breakpoints = spyder.plugins.breakpoints.plugin:Breakpoints',
-    ('code_completion = spyder.plugins.completion.manager.plugin:'
-     'CompletionManager'),
-    'core = spyder.plugins.core.plugin:Core',
+    'completions = spyder.plugins.completion.manager.plugin:CompletionManager',
     'editor = spyder.plugins.editor.plugin:Editor',
     'explorer = spyder.plugins.explorer.plugin:Explorer',
-    ('fallback_completion = spyder.plugins.completion.fallback.plugin:'
-     'FallbackPlugin'),
     'find_in_files = spyder.plugins.findinfiles.plugin:FindInFiles',
     'help = spyder.plugins.help.plugin:Help',
     'historylog = spyder.plugins.history.plugin:HistoryLog',
+    'internal_console = spyder.plugins.console.plugin:Console',
     'ipython_console = spyder.plugins.ipythonconsole.plugin:IPythonConsole',
-    ('kite_completion = spyder.plugins.completion.kite.plugin:'
-     'KiteCompletionPlugin'),
+    'main_interpreter = spyder.plugins.maininterpreter.plugin:MainInterpreter',
+    'mainmenu = spyder.plugins.mainmenu.plugin:MainMenu',
     'onlinehelp = spyder.plugins.onlinehelp.plugin:OnlineHelp',
     'outline_explorer = spyder.plugins.outlineexplorer.plugin:OutlineExplorer',
     'plots = spyder.plugins.plots.plugin:Plots',
+    'preferences = spyder.plugins.preferences.plugin:Preferences',
     'profiler = spyder.plugins.profiler.plugin:Profiler',
     'project_explorer = spyder.plugins.projects.plugin:Projects',
     'pylint = spyder.plugins.pylint.plugin:Pylint',
-    ('lsp_completion = spyder.plugins.completion.languageserver.plugin:'
-     'LanguageServerPlugin'),
-    'python = spyder.plugins.python.plugin:Python',
-    ('variable_explorer = spyder.plugins.variableexplorer.plugin:'
-     'VariableExplorer'),
-    ('workingdir = spyder.plugins.workingdirectory.plugin:'
-     'WorkingDirectory'),
+    'run = spyder.plugins.run.plugin:Run',
+    'shortcuts = spyder.plugins.shortcuts.plugin:Shortcuts',
+    'statusbar = spyder.plugins.statusbar.plugin:StatusBar',
+    'toolbar = spyder.plugins.toolbar.plugin:Toolbar',
+    'variable_explorer = spyder.plugins.variableexplorer.plugin:VariableExplorer',
+    'workingdir = spyder.plugins.workingdirectory.plugin:WorkingDirectory',
 ]
 
 

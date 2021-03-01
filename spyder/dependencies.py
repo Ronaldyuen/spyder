@@ -50,9 +50,9 @@ PICKLESHARE_REQVER = '>=0.4'
 PSUTIL_REQVER = '>=5.3'
 PYGMENTS_REQVER = '>=2.0'
 PYLINT_REQVER = '>=1.0'
-PYLS_REQVER = '>=0.36.1;<1.0.0'
+PYLS_REQVER = '>=0.36.2;<1.0.0'
 PYLS_BLACK_REQVER = '>=0.4.6'
-PYLS_SPYDER_REQVER = '>=0.1.1'
+PYLS_SPYDER_REQVER = '>=0.3.2'
 PYXDG_REQVER = '>=0.26'
 PYZMQ_REQVER = '>=17'
 QDARKSTYLE_REQVER = '>=2.8'
@@ -67,7 +67,7 @@ TEXTDISTANCE_REQVER = '>=4.2.0'
 THREE_MERGE_REQVER = '>=0.1.1'
 # None for pynsist install for now
 # (check way to add dist.info/egg.info from packages without wheels available)
-WATCHDOG_REQVER = None if is_pynsist() else '>=0.10.3'
+WATCHDOG_REQVER = None if is_pynsist() else '>=0.10.3;<2.0.0'
 
 
 # Optional dependencies
@@ -352,7 +352,7 @@ def check(modname):
         if dependency.modname == modname:
             return dependency.check()
     else:
-        raise RuntimeError("Unkwown dependency %s" % modname)
+        raise RuntimeError("Unknown dependency %s" % modname)
 
 
 def status(deps=DEPENDENCIES, linesep=os.linesep):
