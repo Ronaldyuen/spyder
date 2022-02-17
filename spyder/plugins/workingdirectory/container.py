@@ -14,11 +14,12 @@ import os.path as osp
 
 # Third party imports
 from qtpy.compat import getexistingdirectory
-from qtpy.QtCore import Signal, Slot
+from qtpy.QtCore import QSize, Signal, Slot
 
 # Local imports
+from spyder.api.config.decorators import on_conf_change
 from spyder.api.translations import get_translation
-from spyder.api.widgets import PluginMainContainer
+from spyder.api.widgets.main_container import PluginMainContainer
 from spyder.api.widgets.toolbars import ApplicationToolbar
 from spyder.config.base import get_home_dir
 from spyder.utils.misc import getcwd_or_home
@@ -29,7 +30,7 @@ from spyder.widgets.comboboxes import PathComboBox
 _ = get_translation('spyder')
 
 
-# --- Constants
+# ---- Constants
 # ----------------------------------------------------------------------------
 class WorkingDirectoryActions:
     Previous = 'previous_action'
@@ -42,28 +43,36 @@ class WorkingDirectoryToolbarSections:
     Main = "main_section"
 
 
-# --- Widgets
+class WorkingDirectoryToolbarItems:
+    PathComboBox = 'path_combo'
+
+# ---- Widgets
 # ----------------------------------------------------------------------------
 class WorkingDirectoryToolbar(ApplicationToolbar):
     ID = 'working_directory_toolbar'
 
 
-# --- Container
+class WorkingDirectoryComboBox(PathComboBox):
+
+    def __init__(self, parent, adjust_to_contents=False, id_=None):
+        super().__init__(parent, adjust_to_contents, id_=id_)
+
+        # Set min width
+        self.setMinimumWidth(140)
+
+    def sizeHint(self):
+        """Recommended size when there are toolbars to the right."""
+        return QSize(250, 10)
+
+    def enterEvent(self, event):
+        """Set current path as the tooltip of the widget on hover."""
+        self.setToolTip(self.currentText())
+
+
+# ---- Container
 # ----------------------------------------------------------------------------
 class WorkingDirectoryContainer(PluginMainContainer):
     """Container for the working directory toolbar."""
-
-    DEFAULT_OPTIONS = {
-        'history': [],
-        'console/fixed_directory': '',
-        'console/use_cwd': True,
-        'console/use_project_or_home_directory': False,
-        'startup/fixed_directory': '',
-        'startup/use_fixed_directory': False,
-        'workdir': None,
-        'working_dir_adjusttocontents': False,
-        'working_dir_history': 20,
-    }
 
     # Signals
     sig_current_directory_changed = Signal(str)
@@ -78,32 +87,25 @@ class WorkingDirectoryContainer(PluginMainContainer):
 
     # ---- PluginMainContainer API
     # ------------------------------------------------------------------------
-    def setup(self, options):
+    def setup(self):
 
         # Variables
-        self.history = self.get_option('history')
+        self.history = self.get_conf('history', [])
         self.histindex = None
 
         # Widgets
         title = _('Current working directory')
         self.toolbar = WorkingDirectoryToolbar(self, title)
-        self.pathedit = PathComboBox(
+        self.pathedit = WorkingDirectoryComboBox(
             self,
-            adjust_to_contents=self.get_option('working_dir_adjusttocontents'),
+            adjust_to_contents=self.get_conf('working_dir_adjusttocontents'),
+            id_=WorkingDirectoryToolbarItems.PathComboBox
         )
 
         # Widget Setup
         self.toolbar.setWindowTitle(title)
         self.toolbar.setObjectName(title)
-        self.pathedit.setToolTip(
-            _(
-                "This is the working directory for newly\n"
-                "opened IPython consoles, for the Files\n"
-                "and Find panes and for new files\n"
-                "created in the editor"
-            )
-        )
-        self.pathedit.setMaxCount(self.get_option('working_dir_history'))
+        self.pathedit.setMaxCount(self.get_conf('working_dir_history'))
         self.pathedit.selected_text = self.pathedit.currentText()
 
         # Signals
@@ -140,7 +142,7 @@ class WorkingDirectoryContainer(PluginMainContainer):
             triggered=self.parent_directory,
         )
 
-        for item in [self.previous_action, self.next_action, self.pathedit,
+        for item in [self.pathedit,
                      browse_action, parent_action]:
             self.add_item_to_toolbar(
                 item,
@@ -156,11 +158,11 @@ class WorkingDirectoryContainer(PluginMainContainer):
             and self.histindex < len(self.history) - 1
         )
 
-    def on_option_update(self, option, value):
-        if option == 'history':
-            self.history = value
+    @on_conf_change(option='history')
+    def on_history_update(self, value):
+        self.history = value
 
-    # --- API
+    # ---- API
     # ------------------------------------------------------------------------
     def get_workdir(self):
         """
@@ -172,12 +174,12 @@ class WorkingDirectoryContainer(PluginMainContainer):
         str:
             The current working directory.
         """
-        if self.get_option('startup/use_fixed_directory'):
-            workdir = self.get_option('startup/fixed_directory')
-        elif self.get_option('console/use_project_or_home_directory'):
+        if self.get_conf('startup/use_fixed_directory', ''):
+            workdir = self.get_conf('startup/fixed_directory')
+        elif self.get_conf('console/use_project_or_home_directory', ''):
             workdir = get_home_dir()
         else:
-            workdir = self.get_option('console/fixed_directory')
+            workdir = self.get_conf('console/fixed_directory', '')
 
         if not osp.isdir(workdir):
             workdir = get_home_dir()
@@ -294,13 +296,13 @@ class WorkingDirectoryContainer(PluginMainContainer):
         history: list
             List of string paths.
         """
-        self.change_option('history', history)
+        self.set_conf('history', history)
         if history:
             self.pathedit.addItems(history)
 
-        if self.get_option('workdir') is None:
+        if self.get_conf('workdir', None) is None:
             workdir = self.get_workdir()
         else:
-            workdir = self.get_option('workdir')
+            workdir = self.get_conf('workdir')
 
         self.chdir(workdir)

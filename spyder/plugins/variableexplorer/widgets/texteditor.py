@@ -22,14 +22,14 @@ from spyder.config.base import _
 from spyder.config.gui import get_font
 from spyder.py3compat import (is_binary_string, to_binary_string,
                               to_text_string)
-from spyder.utils import icon_manager as ima
+from spyder.utils.icon_manager import ima
 from spyder.plugins.variableexplorer.widgets.basedialog import BaseDialog
 
 
 class TextEditor(BaseDialog):
     """Array Editor Dialog"""
     def __init__(self, text, title='', font=None, parent=None, readonly=False):
-        QDialog.__init__(self, parent)
+        super().__init__(parent)
 
         # Destroying the C++ object right after closing the dialog box,
         # otherwise it may be garbage-collected in another QThread

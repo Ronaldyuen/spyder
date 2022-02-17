@@ -83,6 +83,8 @@ class ProjectsMenuSections:
 
 class ToolsMenuSections:
     Tools = 'tools_section'
+    External = 'external_section'
+    Extras = 'extras_section'
 
 
 class ViewMenuSections:

@@ -22,20 +22,21 @@ import time
 # Third party imports
 import pylint
 from qtpy.compat import getopenfilename
-from qtpy.QtCore import (QByteArray, QProcess, QProcessEnvironment, Qt,
-                         Signal, Slot)
-from qtpy.QtWidgets import (QHBoxLayout, QInputDialog, QLabel, QMessageBox,
-                            QSizePolicy, QTreeWidgetItem, QVBoxLayout, QWidget)
+from qtpy.QtCore import (QByteArray, QProcess, QProcessEnvironment, Signal,
+                         Slot)
+from qtpy.QtWidgets import (QInputDialog, QLabel, QMessageBox, QTreeWidgetItem,
+                            QVBoxLayout)
 
 # Local imports
+from spyder.api.config.decorators import on_conf_change
 from spyder.api.translations import get_translation
-from spyder.api.widgets import PluginMainWidget
+from spyder.api.widgets.main_widget import PluginMainWidget
 from spyder.config.base import get_conf_path, running_in_mac_app
-from spyder.config.gui import is_dark_interface
 from spyder.plugins.pylint.utils import get_pylintrc_path
 from spyder.plugins.variableexplorer.widgets.texteditor import TextEditor
-from spyder.utils import icon_manager as ima
+from spyder.utils.icon_manager import ima
 from spyder.utils.misc import getcwd_or_home
+from spyder.utils.palette import QStylePalette, SpyderPalette
 from spyder.widgets.comboboxes import (PythonModulesComboBox,
                                        is_module_or_package)
 from spyder.widgets.onecolumntree import OneColumnTree, OneColumnTreeActions
@@ -49,24 +50,21 @@ _ = get_translation("spyder")
 PYLINT_VER = pylint.__version__
 MIN_HISTORY_ENTRIES = 5
 MAX_HISTORY_ENTRIES = 100
-DANGER_COLOR = "#FF0000"
-WARNING_COLOR = "#EE5500"
-SUCCESS_COLOR = "#22AA22"
+DANGER_COLOR = SpyderPalette.COLOR_ERROR_1
+WARNING_COLOR = SpyderPalette.COLOR_WARN_1
+SUCCESS_COLOR = SpyderPalette.COLOR_SUCCESS_1
 
 
 # TODO: There should be some palette from the appearance plugin so this
 # is easier to use
-if is_dark_interface():
-    MAIN_TEXT_COLOR = "white"
-    MAIN_PREVRATE_COLOR = "white"
-else:
-    MAIN_TEXT_COLOR = "#444444"
-    MAIN_PREVRATE_COLOR = "#666666"
+MAIN_TEXT_COLOR = QStylePalette.COLOR_TEXT_1
+MAIN_PREVRATE_COLOR = QStylePalette.COLOR_TEXT_1
+
 
 
 class PylintWidgetActions:
     ChangeHistory = "change_history_depth_action"
-    RunCodeAnalysis = "run analysis"
+    RunCodeAnalysis = "run_analysis_action"
     BrowseFile = "browse_action"
     ShowLog = "log_action"
 
@@ -81,7 +79,62 @@ class PylintWidgetMainToolbarSections:
     Main = "main_section"
 
 
-# --- Widgets
+class PylintWidgetToolbarItems:
+    FileComboBox = 'file_combo'
+    RateLabel = 'rate_label'
+    DateLabel = 'date_label'
+    Stretcher1 = 'stretcher_1'
+    Stretcher2 = 'stretcher_2'
+
+
+# ---- Items
+class CategoryItem(QTreeWidgetItem):
+    """
+    Category item for results.
+
+    Notes
+    -----
+    Possible categories are Convention, Refactor, Warning and Error.
+    """
+
+    CATEGORIES = {
+        "Convention": {
+            'translation_string': _("Convention"),
+            'icon': ima.icon("convention")
+        },
+        "Refactor": {
+            'translation_string': _("Refactor"),
+            'icon': ima.icon("refactor")
+        },
+        "Warning": {
+            'translation_string': _("Warning"),
+            'icon': ima.icon("warning")
+        },
+        "Error": {
+            'translation_string': _("Error"),
+            'icon': ima.icon("error")
+        }
+    }
+
+    def __init__(self, parent, category, number_of_messages):
+        # Messages string to append to category.
+        if number_of_messages > 1 or number_of_messages == 0:
+            messages = _('messages')
+        else:
+            messages = _('message')
+
+        # Category title.
+        title = self.CATEGORIES[category]['translation_string']
+        title += f" ({number_of_messages} {messages})"
+
+        super().__init__(parent, [title], QTreeWidgetItem.Type)
+
+        # Set icon
+        icon = self.CATEGORIES[category]['icon']
+        self.setIcon(0, icon)
+
+
+# ---- Widgets
 # ----------------------------------------------------------------------------
 # TODO: display results on 3 columns instead of 1: msg_id, lineno, message
 class ResultsTree(OneColumnTree):
@@ -116,8 +169,14 @@ class ResultsTree(OneColumnTree):
             self.sig_edit_goto_requested.emit(fname, lineno, "")
 
     def clicked(self, item):
-        """Click event"""
-        self.activated(item)
+        """Click event."""
+        if isinstance(item, CategoryItem):
+            if item.isExpanded():
+                self.collapseItem(item)
+            else:
+                self.expandItem(item)
+        else:
+            self.activated(item)
 
     def clear_results(self):
         self.clear()
@@ -129,23 +188,21 @@ class ResultsTree(OneColumnTree):
         self.refresh()
 
     def refresh(self):
-        title = _("Results for ")+self.filename
+        title = _("Results for ") + self.filename
         self.set_title(title)
         self.clear()
         self.data = {}
 
         # Populating tree
         results = (
-            (_("Convention"), ima.icon("convention"), self.results["C:"]),
-            (_("Refactor"), ima.icon("refactor"), self.results["R:"]),
-            (_("Warning"), ima.icon("warning"), self.results["W:"]),
-            (_("Error"), ima.icon("error"), self.results["E:"]),
+            ("Convention", self.results["C:"]),
+            ("Refactor", self.results["R:"]),
+            ("Warning", self.results["W:"]),
+            ("Error", self.results["E:"]),
         )
-        for title, icon, messages in results:
-            title += " (%d message%s)" % (len(messages),
-                                          "s" if len(messages) > 1 else "")
-            title_item = QTreeWidgetItem(self, [title], QTreeWidgetItem.Type)
-            title_item.setIcon(0, icon)
+
+        for category, messages in results:
+            title_item = CategoryItem(self, category, len(messages))
             if not messages:
                 title_item.setDisabled(True)
 
@@ -208,11 +265,6 @@ class PylintWidget(PluginMainWidget):
     """
     Pylint widget.
     """
-    DEFAULT_OPTIONS = {
-        "history_filenames": [],
-        "max_entries": 30,
-        "project_dir": None,
-    }
     ENABLE_SPINNER = True
 
     DATAPATH = get_conf_path("pylint.results")
@@ -241,9 +293,8 @@ class PylintWidget(PluginMainWidget):
     level.
     """
 
-    def __init__(self, name=None, plugin=None, parent=None,
-                 options=DEFAULT_OPTIONS):
-        super().__init__(name, plugin, parent, options)
+    def __init__(self, name=None, plugin=None, parent=None):
+        super().__init__(name, plugin, parent)
 
         # Attributes
         self._process = None
@@ -251,14 +302,20 @@ class PylintWidget(PluginMainWidget):
         self.error_output = None
         self.filename = None
         self.rdata = []
-        self.curr_filenames = self.get_option("history_filenames")
+        self.curr_filenames = self.get_conf("history_filenames")
         self.code_analysis_action = None
         self.browse_action = None
 
         # Widgets
-        self.filecombo = PythonModulesComboBox(self)
+        self.filecombo = PythonModulesComboBox(
+            self, id_=PylintWidgetToolbarItems.FileComboBox)
+
         self.ratelabel = QLabel(self)
+        self.ratelabel.ID = PylintWidgetToolbarItems.RateLabel
+
         self.datelabel = QLabel(self)
+        self.datelabel.ID = PylintWidgetToolbarItems.DateLabel
+
         self.treewidget = ResultsTree(self)
 
         if osp.isfile(self.DATAPATH):
@@ -384,7 +441,7 @@ class PylintWidget(PluginMainWidget):
 
     def _update_combobox_history(self):
         """Change the number of files listed in the history combobox."""
-        max_entries = self.get_option("max_entries")
+        max_entries = self.get_conf("max_entries")
         if self.filecombo.count() > max_entries:
             num_elements = self.filecombo.count()
             diff = num_elements - max_entries
@@ -411,7 +468,7 @@ class PylintWidget(PluginMainWidget):
                     list_save_files.append(fname)
 
             self.curr_filenames = list_save_files[:MAX_HISTORY_ENTRIES]
-            self.set_option("history_filenames", self.curr_filenames)
+            self.set_conf("history_filenames", self.curr_filenames)
         else:
             self.curr_filenames = []
 
@@ -423,7 +480,7 @@ class PylintWidget(PluginMainWidget):
     def get_focus_widget(self):
         return self.treewidget
 
-    def setup(self, options):
+    def setup(self):
         change_history_depth_action = self.create_action(
             PylintWidgetActions.ChangeHistory,
             text=_("History..."),
@@ -433,13 +490,10 @@ class PylintWidget(PluginMainWidget):
         )
         self.code_analysis_action = self.create_action(
             PylintWidgetActions.RunCodeAnalysis,
-            icon_text=_("Analyze"),
             text=_("Run code analysis"),
             tip=_("Run code analysis"),
             icon=self.create_icon("run"),
             triggered=lambda: self.sig_start_analysis_requested.emit(),
-            context=Qt.ApplicationShortcut,
-            register_shortcut=True
         )
         self.browse_action = self.create_action(
             PylintWidgetActions.BrowseFile,
@@ -451,7 +505,6 @@ class PylintWidget(PluginMainWidget):
         self.log_action = self.create_action(
             PylintWidgetActions.ShowLog,
             text=_("Output"),
-            icon_text=_("Output"),
             tip=_("Complete output"),
             icon=self.create_icon("log"),
             triggered=self.show_log,
@@ -506,8 +559,13 @@ class PylintWidget(PluginMainWidget):
             )
 
         secondary_toolbar = self.create_toolbar("secondary")
-        for item in [self.ratelabel, self.create_stretcher(), self.datelabel,
-                     self.create_stretcher(), self.log_action]:
+        for item in [self.ratelabel,
+                     self.create_stretcher(
+                         id_=PylintWidgetToolbarItems.Stretcher1),
+                     self.datelabel,
+                     self.create_stretcher(
+                         id_=PylintWidgetToolbarItems.Stretcher2),
+                     self.log_action]:
             self.add_item_to_toolbar(
                 item,
                 secondary_toolbar,
@@ -526,7 +584,8 @@ class PylintWidget(PluginMainWidget):
         # Signals
         self.filecombo.valid.connect(self.code_analysis_action.setEnabled)
 
-    def on_option_update(self, option, value):
+    @on_conf_change(option=['max_entries', 'history_filenames'])
+    def on_conf_update(self, option, value):
         if option == "max_entries":
             self._update_combobox_history()
         elif option == "history_filenames":
@@ -534,18 +593,9 @@ class PylintWidget(PluginMainWidget):
             self._update_combobox_history()
 
     def update_actions(self):
-        fm = self.ratelabel.fontMetrics()
-        toolbar = self.get_main_toolbar()
-        width = max([fm.width(_("Stop")), fm.width(_("Analyze"))])
-        widget = toolbar.widgetForAction(self.code_analysis_action)
-        if widget:
-            widget.setMinimumWidth(width * 1.5)
-
         if self._is_running():
-            self.code_analysis_action.setIconText(_("Stop"))
             self.code_analysis_action.setIcon(self.create_icon("stop"))
         else:
-            self.code_analysis_action.setIconText(_("Analyze"))
             self.code_analysis_action.setIcon(self.create_icon("run"))
 
         self.remove_obsolete_items()
@@ -574,15 +624,15 @@ class PylintWidget(PluginMainWidget):
             dialog.setInputMode(QInputDialog.IntInput)
             dialog.setIntRange(MIN_HISTORY_ENTRIES, MAX_HISTORY_ENTRIES)
             dialog.setIntStep(1)
-            dialog.setIntValue(self.get_option("max_entries"))
+            dialog.setIntValue(self.get_conf("max_entries"))
 
             # Connect slot
             dialog.intValueSelected.connect(
-                lambda value: self.set_option("max_entries", value))
+                lambda value: self.set_conf("max_entries", value))
 
             dialog.show()
         else:
-            self.set_option("max_entries", value)
+            self.set_conf("max_entries", value)
 
     def get_filename(self):
         """
@@ -625,7 +675,7 @@ class PylintWidget(PluginMainWidget):
             self.filecombo.setCurrentIndex(0)
 
         num_elements = self.filecombo.count()
-        if num_elements > self.get_option("max_entries"):
+        if num_elements > self.get_conf("max_entries"):
             self.filecombo.removeItem(num_elements - 1)
 
         self.filecombo.selected()
@@ -692,7 +742,7 @@ class PylintWidget(PluginMainWidget):
 
         self.rdata.insert(0, (filename, data))
 
-        while len(self.rdata) > self.get_option("max_entries"):
+        while len(self.rdata) > self.get_conf("max_entries"):
             self.rdata.pop(-1)
 
         with open(self.DATAPATH, "wb") as fh:
@@ -782,7 +832,7 @@ class PylintWidget(PluginMainWidget):
             # Working directory
             getcwd_or_home(),
             # Project directory
-            self.get_option("project_dir"),
+            self.get_conf("project_dir"),
             # Home directory
             osp.expanduser("~"),
         ]
@@ -903,12 +953,15 @@ class PylintWidget(PluginMainWidget):
 def test():
     """Run pylint widget test"""
     from spyder.utils.qthelpers import qapplication
+    from unittest.mock import MagicMock
+
+    plugin_mock = MagicMock()
+    plugin_mock.CONF_SECTION = 'pylint'
 
     app = qapplication(test_time=20)
-    options = PylintWidget.DEFAULT_OPTIONS.copy()
-    widget = PylintWidget(name="pylint", options=options)
-    widget._setup(options)
-    widget.setup(options)
+    widget = PylintWidget(name="pylint", plugin=plugin_mock)
+    widget._setup()
+    widget.setup()
     widget.resize(640, 480)
     widget.show()
     widget.start_code_analysis(filename=__file__)

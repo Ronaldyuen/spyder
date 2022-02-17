@@ -9,6 +9,7 @@
 
 # Standard library imports
 import ctypes
+import logging
 import os
 import os.path as osp
 import random
@@ -16,7 +17,19 @@ import socket
 import sys
 import time
 
-# To prevent a race condition with ZMQ
+# Prevent showing internal logging errors
+# Fixes spyder-ide/spyder#15768
+logging.raiseExceptions = False
+
+# Prevent that our dependencies display warnings when not in debug mode.
+# Some of them are reported in the console and others through our
+# report error dialog.
+# Note: The log level when debugging is set on the main window.
+# Fixes spyder-ide/spyder#15163
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.ERROR)
+
+# Prevent a race condition with ZMQ
 # See spyder-ide/spyder#5324.
 import zmq
 
@@ -45,6 +58,9 @@ else:
 # Start Spyder with a clean configuration directory for testing purposes
 if CLI_OPTIONS.safe_mode:
     os.environ['SPYDER_SAFE_MODE'] = 'True'
+
+if CLI_OPTIONS.conf_dir:
+    os.environ['SPYDER_CONFDIR'] = CLI_OPTIONS.conf_dir
 
 
 def send_args_to_spyder(args):
@@ -151,6 +167,13 @@ def main():
     if options.debug_info:
         levels = {'minimal': '2', 'verbose': '3'}
         os.environ['SPYDER_DEBUG'] = levels[options.debug_info]
+
+    _filename = 'spyder-debug.log'
+    if options.debug_output == 'file':
+        _filepath = osp.realpath(_filename)
+    else:
+        _filepath = get_conf_path(_filename)
+    os.environ['SPYDER_DEBUG_FILE'] = _filepath
 
     if options.paths:
         from spyder.config.base import get_conf_paths

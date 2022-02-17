@@ -6,9 +6,12 @@
 
 """Module checking Spyder installation requirements"""
 
+# Standard library imports
 import sys
 import os.path as osp
-from distutils.version import LooseVersion
+
+# Third-party imports
+from pkg_resources import parse_version
 
 
 def show_warning(message):
@@ -36,12 +39,12 @@ def check_path():
 
 def check_qt():
     """Check Qt binding requirements"""
-    qt_infos = dict(pyqt5=("PyQt5", "5.6"))
+    qt_infos = dict(pyqt5=("PyQt5", "5.9"), pyside2=("PySide2", "5.12"))
     try:
         import qtpy
         package_name, required_ver = qt_infos[qtpy.API]
-        actual_ver = qtpy.PYQT_VERSION
-        if LooseVersion(actual_ver) < LooseVersion(required_ver):
+        actual_ver = qtpy.QT_VERSION
+        if parse_version(actual_ver) < parse_version(required_ver):
             show_warning("Please check Spyder installation requirements:\n"
                          "%s %s+ is required (found v%s)."
                          % (package_name, required_ver, actual_ver))
@@ -52,19 +55,3 @@ def check_qt():
                      "%s %s+\n\n"
                      "are required to run Spyder."
                      % (qt_infos['pyqt5']))
-
-
-def check_spyder_kernels():
-    """Check spyder-kernel requirement."""
-    try:
-        import spyder_kernels
-        required_ver = '1.0.0'
-        actual_ver = spyder_kernels.__version__
-        if LooseVersion(actual_ver) < LooseVersion(required_ver):
-            show_warning("Please check Spyder installation requirements:\n"
-                         "spyder-kernels >= 1.0 is required (found %s)."
-                         % actual_ver)
-    except ImportError:
-        show_warning("Failed to import spyder-kernels.\n"
-                     "Please check Spyder installation requirements:\n\n"
-                     "spyder-kernels >= 1.0 is required")

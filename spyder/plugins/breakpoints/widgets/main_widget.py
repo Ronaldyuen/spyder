@@ -18,15 +18,16 @@ Breakpoint widget.
 import sys
 
 # Third party imports
-from qtpy import API
+from qtpy import PYQT5
 from qtpy.compat import to_qvariant
 from qtpy.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from qtpy.QtWidgets import QItemDelegate, QTableView, QVBoxLayout
 
 # Local imports
 from spyder.api.translations import get_translation
-from spyder.api.widgets import (PluginMainWidgetMenus, PluginMainWidget,
-                                SpyderWidgetMixin)
+from spyder.api.widgets.main_widget import (PluginMainWidgetMenus,
+                                            PluginMainWidget)
+from spyder.api.widgets.mixins import SpyderWidgetMixin
 from spyder.utils.sourcecode import disambiguate_fname
 
 
@@ -184,7 +185,11 @@ class BreakpointTableView(QTableView, SpyderWidgetMixin):
     sig_conditional_breakpoint_requested = Signal()
 
     def __init__(self, parent, data):
-        super().__init__(parent)
+        if PYQT5:
+            super().__init__(parent, class_parent=parent)
+        else:
+            QTableView.__init__(self, parent)
+            SpyderWidgetMixin.__init__(self, class_parent=parent)
 
         # Widgets
         self.model = BreakpointTableModel(self, data)
@@ -202,7 +207,7 @@ class BreakpointTableView(QTableView, SpyderWidgetMixin):
 
     # --- SpyderWidgetMixin API
     # ------------------------------------------------------------------------
-    def setup(self, options={}):
+    def setup(self):
         clear_all_action = self.create_action(
             BreakpointTableViewActions.ClearAllBreakpoints,
             _("Clear breakpoints in all files"),
@@ -310,8 +315,6 @@ class BreakpointWidget(PluginMainWidget):
     Breakpoints widget.
     """
 
-    DEFAULT_OPTIONS = {}
-
     # --- Signals
     # ------------------------------------------------------------------------
     sig_clear_all_breakpoints_requested = Signal()
@@ -351,9 +354,8 @@ class BreakpointWidget(PluginMainWidget):
     Send a request to set/edit a condition on a single selected breakpoint.
     """
 
-    def __init__(self, name=None, plugin=None, parent=None,
-                 options=DEFAULT_OPTIONS):
-        super().__init__(name, plugin, parent=parent, options=options)
+    def __init__(self, name=None, plugin=None, parent=None):
+        super().__init__(name, plugin, parent=parent)
 
         # Widgets
         self.breakpoints_table = BreakpointTableView(self, {})
@@ -381,11 +383,8 @@ class BreakpointWidget(PluginMainWidget):
     def get_focus_widget(self):
         return self.breakpoints_table
 
-    def setup(self, options):
+    def setup(self):
         self.breakpoints_table.setup()
-
-    def on_option_update(self, option, value):
-        pass
 
     def update_actions(self):
         rows = self.breakpoints_table.selectionModel().selectedRows()

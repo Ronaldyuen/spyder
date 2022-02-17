@@ -9,14 +9,13 @@
 """Fixtures for the Editor plugin tests."""
 
 import os.path as osp
-try:
-    from unittest.mock import MagicMock, Mock
-except ImportError:
-    from mock import MagicMock, Mock  # Python 2
+from unittest.mock import MagicMock, Mock
+
+from spyder.api.plugins import Plugins
+from spyder.utils.qthelpers import qapplication
 
 # This is needed to avoid an error because QtAwesome
 # needs a QApplication to work correctly.
-from spyder.utils.qthelpers import qapplication
 app = qapplication()
 
 from qtpy.QtWidgets import QMainWindow
@@ -44,19 +43,17 @@ def editor_plugin(qtbot, monkeypatch):
         def __getattr__(self, attr):
             if attr.endswith('actions'):
                 return []
-            elif attr == 'projects':
-                projects = Mock()
-                projects.get_active_project.return_value = None
-                return projects
-            elif attr == 'ipyconsole':
-                ipyconsole = Mock()
-                ipyconsole.get_pdb_state.return_value = False
-                return ipyconsole
             else:
                 return Mock()
 
         def get_spyder_pythonpath(*args):
             return []
+
+        def get_plugin(self, plugin_name, error=True):
+            if plugin_name in [Plugins.IPythonConsole, Plugins.Projects]:
+                return None
+            else:
+                return Mock()
 
     window = MainMock()
     editor = Editor(window)
@@ -81,9 +78,9 @@ def python_files(tmpdir_factory):
                  ('file1.py', 'file2.py', 'file3.py', 'file4.py',
                   'untitled4.py')]
     for filename in filenames:
-        with open(filename, 'w') as f:
+        with open(filename, 'w', newline='') as f:
             f.write("# -*- coding: utf-8 -*-\n"
-                    "print(Hello World!)\n")
+                    "print('Hello World!')\n")
 
     return filenames, tmpdir
 

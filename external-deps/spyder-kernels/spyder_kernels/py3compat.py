@@ -258,6 +258,7 @@ if PY2:
     import string
     str_lower = string.lower
     from itertools import izip_longest as zip_longest
+    from backports.functools_lru_cache import lru_cache
 else:
     # Python 3
     getcwd = os.getcwd
@@ -265,6 +266,7 @@ else:
         return (a > b) - (a < b)
     str_lower = str.lower
     from itertools import zip_longest
+    from functools import lru_cache
 
 def qbytearray_to_str(qba):
     """Convert QByteArray object to str in a way compatible with Python 2/3"""
@@ -345,6 +347,12 @@ else:
     def encode(u):
         """Encoding is not a problem in python 3."""
         return u
+
+
+def compat_exec(code, globals, locals):
+    # Wrap exec in a function
+    exec(code, globals, locals)
+
 
 if __name__ == '__main__':
     pass

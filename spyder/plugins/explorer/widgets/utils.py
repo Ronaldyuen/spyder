@@ -21,7 +21,7 @@ from qtpy.QtWidgets import QFileIconProvider, QMessageBox
 from spyder.api.translations import get_translation
 from spyder.py3compat import str_lower
 from spyder.utils import encoding
-from spyder.utils import icon_manager as ima
+from spyder.utils.icon_manager import ima
 
 
 _ = get_translation('spyder')
@@ -31,7 +31,10 @@ def open_file_in_external_explorer(filename):
     if sys.platform == "darwin":
         subprocess.call(["open", "-R", filename])
     elif os.name == 'nt':
-        subprocess.call(["explorer", "/select,", filename])
+        if os.path.exists(filename):
+            subprocess.call(["explorer", "/select,", filename])
+        else:
+            subprocess.call(["explorer", os.path.dirname(filename)])
     else:
         filename = os.path.dirname(filename)
         subprocess.call(["xdg-open", filename])
@@ -112,5 +115,5 @@ class IconProvider(QFileIconProvider):
                 icon = ima.get_icon_by_extension_or_type(fname,
                                                          scale_factor=1.0)
             else:
-                icon = ima.get_icon('binary', adjust_for_interface=True)
+                icon = ima.icon('binary')
             return icon

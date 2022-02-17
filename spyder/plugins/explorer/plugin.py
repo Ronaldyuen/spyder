@@ -20,6 +20,8 @@ from qtpy.QtCore import Signal
 # Local imports
 from spyder.api.translations import get_translation
 from spyder.api.plugins import SpyderDockablePlugin, Plugins
+from spyder.api.plugin_registration.decorators import (
+    on_plugin_available, on_plugin_teardown)
 from spyder.plugins.explorer.widgets.main_widget import ExplorerWidget
 from spyder.plugins.explorer.confpage import ExplorerConfigPage
 
@@ -108,14 +110,16 @@ class Explorer(SpyderDockablePlugin):
         Folder to remove.
     """
 
-    sig_folder_renamed = Signal(str)
+    sig_folder_renamed = Signal(str, str)
     """
     This signal is emitted when a folder is renamed.
 
     Parameters
     ----------
-    path: str
-        Folder to remove.
+    old_path: str
+        Old path for renamed folder.
+    new_path: str
+        New path for renamed folder.
     """
 
     sig_interpreter_opened = Signal(str)
@@ -151,7 +155,8 @@ class Explorer(SpyderDockablePlugin):
 
     # ---- SpyderDockablePlugin API
     # ------------------------------------------------------------------------
-    def get_name(self):
+    @staticmethod
+    def get_name():
         """Return widget title"""
         return _("Files")
 
@@ -164,15 +169,8 @@ class Explorer(SpyderDockablePlugin):
         # TODO: Find a decent icon for the explorer
         return self.create_icon('outline_explorer')
 
-    def register(self):
-        """Register plugin in Spyder's main window"""
+    def on_initialize(self):
         widget = self.get_widget()
-        editor = self.get_plugin(Plugins.Editor)
-        ipyconsole = self.get_plugin(Plugins.IPythonConsole)
-        preferences = self.get_plugin(Plugins.Preferences)
-
-        # Add preference config page
-        preferences.register_plugin_preferences(self)
 
         # Expose widget signals on the plugin
         widget.sig_dir_opened.connect(self.sig_dir_opened)
@@ -187,24 +185,59 @@ class Explorer(SpyderDockablePlugin):
         widget.sig_tree_removed.connect(self.sig_folder_removed)
         widget.sig_tree_renamed.connect(self.sig_folder_renamed)
 
-        # Connect plugin signals with plugins slots
-        if editor:
-            editor.sig_dir_opened.connect(self.chdir)
-            self.sig_file_created.connect(lambda t: editor.new(text=t))
-            self.sig_file_removed.connect(editor.removed)
-            self.sig_file_renamed.connect(editor.renamed)
-            self.sig_folder_removed.connect(editor.removed_tree)
-            self.sig_folder_renamed.connect(editor.renamed_tree)
-            self.sig_module_created.connect(editor.new)
-            self.sig_open_file_requested.connect(editor.load)
+    @on_plugin_available(plugin=Plugins.Editor)
+    def on_editor_available(self):
+        editor = self.get_plugin(Plugins.Editor)
 
-        if ipyconsole:
-            self.sig_interpreter_opened.connect(
-                ipyconsole.create_client_from_path)
-            self.sig_run_requested.connect(
-                lambda fname:
-                ipyconsole.run_script(fname, osp.dirname(fname), '', False,
-                                      False, False, True, False))
+        editor.sig_dir_opened.connect(self.chdir)
+        self.sig_file_created.connect(lambda t: editor.new(text=t))
+        self.sig_file_removed.connect(editor.removed)
+        self.sig_file_renamed.connect(editor.renamed)
+        self.sig_folder_removed.connect(editor.removed_tree)
+        self.sig_folder_renamed.connect(editor.renamed_tree)
+        self.sig_module_created.connect(editor.new)
+        self.sig_open_file_requested.connect(editor.load)
+
+    @on_plugin_available(plugin=Plugins.Preferences)
+    def on_preferences_available(self):
+        # Add preference config page
+        preferences = self.get_plugin(Plugins.Preferences)
+        preferences.register_plugin_preferences(self)
+
+    @on_plugin_available(plugin=Plugins.IPythonConsole)
+    def on_ipython_console_available(self):
+        ipyconsole = self.get_plugin(Plugins.IPythonConsole)
+        self.sig_interpreter_opened.connect(
+            ipyconsole.create_client_from_path)
+        self.sig_run_requested.connect(
+            lambda fname:
+            ipyconsole.run_script(fname, osp.dirname(fname), '', False,
+                                  False, False, True, False))
+
+    @on_plugin_teardown(plugin=Plugins.Editor)
+    def on_editor_teardown(self):
+        editor = self.get_plugin(Plugins.Editor)
+
+        editor.sig_dir_opened.disconnect(self.chdir)
+        self.sig_file_created.disconnect()
+        self.sig_file_removed.disconnect(editor.removed)
+        self.sig_file_renamed.disconnect(editor.renamed)
+        self.sig_folder_removed.disconnect(editor.removed_tree)
+        self.sig_folder_renamed.disconnect(editor.renamed_tree)
+        self.sig_module_created.disconnect(editor.new)
+        self.sig_open_file_requested.disconnect(editor.load)
+
+    @on_plugin_teardown(plugin=Plugins.Preferences)
+    def on_preferences_teardown(self):
+        preferences = self.get_plugin(Plugins.Preferences)
+        preferences.deregister_plugin_preferences(self)
+
+    @on_plugin_teardown(plugin=Plugins.IPythonConsole)
+    def on_ipython_console_teardown(self):
+        ipyconsole = self.get_plugin(Plugins.IPythonConsole)
+        self.sig_interpreter_opened.disconnect(
+            ipyconsole.create_client_from_path)
+        self.sig_run_requested.disconnect()
 
     # ---- Public API
     # ------------------------------------------------------------------------

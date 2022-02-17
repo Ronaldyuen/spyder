@@ -17,19 +17,19 @@ import sys
 
 # Third library imports
 from qtconsole.svg import svg_to_clipboard, svg_to_image
+from qtpy import PYQT5
 from qtpy.compat import getexistingdirectory, getsavefilename
 from qtpy.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal, Slot
-from qtpy.QtGui import QKeySequence, QPainter, QPixmap
+from qtpy.QtGui import QPainter, QPixmap
 from qtpy.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout,
-                            QMenu, QScrollArea, QScrollBar, QSpinBox,
-                            QSplitter, QStyle, QVBoxLayout, QWidget)
-import qdarkstyle
+                            QScrollArea, QScrollBar, QSplitter, QStyle,
+                            QVBoxLayout, QWidget)
 
 # Local library imports
 from spyder.api.translations import get_translation
-from spyder.api.widgets import SpyderWidgetMixin
-from spyder.config.gui import is_dark_interface
+from spyder.api.widgets.mixins import SpyderWidgetMixin
 from spyder.utils.misc import getcwd_or_home
+from spyder.utils.palette import QStylePalette
 
 
 # TODO:
@@ -73,7 +73,7 @@ def get_unique_figname(dirname, root, ext, start_at_zero=False):
             return osp.join(dirname, figname)
 
 
-class FigureBrowser(QWidget):
+class FigureBrowser(QWidget, SpyderWidgetMixin):
     """
     Widget to browse the figures that were sent by the kernel to the IPython
     console to be plotted inline.
@@ -138,7 +138,12 @@ class FigureBrowser(QWidget):
     """
 
     def __init__(self, parent=None, background_color=None):
-        super().__init__(parent=parent)
+        if PYQT5:
+            super().__init__(parent=parent, class_parent=parent)
+        else:
+            QWidget.__init__(self, parent)
+            SpyderWidgetMixin.__init__(self, class_parent=parent)
+
         self.shellwidget = None
         self.is_visible = True
         self.figviewer = None
@@ -204,7 +209,7 @@ class FigureBrowser(QWidget):
 
     def update_splitter_widths(self, base_width):
         """
-        Update the widths to provide the scrollbar with a fixed minimumwidth.
+        Update the widths to provide the scrollbar with a fixed minimum width.
 
         Parameters
         ----------
@@ -212,19 +217,16 @@ class FigureBrowser(QWidget):
             The available splitter width.
         """
         min_sb_width = self.thumbnails_sb._min_scrollbar_width
-        self.splitter.setSizes([base_width - min_sb_width, min_sb_width])
+        if base_width - min_sb_width > 0:
+            self.splitter.setSizes([base_width - min_sb_width, min_sb_width])
 
     def show_fig_outline_in_viewer(self, state):
         """Draw a frame around the figure viewer if state is True."""
         if state is True:
-            if is_dark_interface():
-                self.figviewer.figcanvas.setStyleSheet(
-                    "FigureCanvas{border: 2px solid %s;}" %
-                    qdarkstyle.palette.DarkPalette.COLOR_BACKGROUND_NORMAL)
-            else:
-                self.figviewer.figcanvas.setStyleSheet(
-                    "FigureCanvas{border: 2px solid %s;}" %
-                    self.figviewer.figcanvas.palette().shadow().color().name())
+            self.figviewer.figcanvas.setStyleSheet(
+                "FigureCanvas{border: 2px solid %s;}" %
+                QStylePalette.COLOR_BACKGROUND_4
+            )
         else:
             self.figviewer.figcanvas.setStyleSheet(
                 "FigureCanvas{border: 0px;}")
@@ -321,7 +323,12 @@ class FigureViewer(QScrollArea, SpyderWidgetMixin):
     """This signal is emitted when a new figure is loaded."""
 
     def __init__(self, parent=None, background_color=None):
-        super().__init__(parent)
+        if PYQT5:
+            super().__init__(parent, class_parent=parent)
+        else:
+            QScrollArea.__init__(self, parent)
+            SpyderWidgetMixin.__init__(self, class_parent=parent)
+
         self.setAlignment(Qt.AlignCenter)
         self.viewport().setObjectName("figviewport")
         self.viewport().setStyleSheet(
@@ -714,10 +721,7 @@ class ThumbnailScrollBar(QFrame):
             extra_padding -
             self.scrollarea.verticalScrollBar().sizeHint().width()
             )
-        if is_dark_interface():
-            # This is required to take into account some hard-coded padding
-            # and margin in qdarkstyle.
-            figure_canvas_width = figure_canvas_width - 6
+        figure_canvas_width = figure_canvas_width - 6
         return figure_canvas_width
 
     def _setup_thumbnail_size(self, thumbnail):
@@ -827,7 +831,15 @@ class ThumbnailScrollBar(QFrame):
         thumbnail.close()
 
         # See: spyder-ide/spyder#12459
-        QTimer.singleShot(150, lambda: thumbnail.setParent(None))
+        QTimer.singleShot(
+            150, lambda: self._remove_thumbnail_parent(thumbnail))
+
+    def _remove_thumbnail_parent(self, thumbnail):
+        try:
+            thumbnail.setParent(None)
+        except RuntimeError:
+            # Omit exception in case the thumbnail has been garbage-collected
+            pass
 
     def set_current_index(self, index):
         """Set the currently selected thumbnail by its index."""
@@ -842,11 +854,14 @@ class ThumbnailScrollBar(QFrame):
 
     def set_current_thumbnail(self, thumbnail):
         """Set the currently selected thumbnail."""
+        if self.current_thumbnail == thumbnail:
+            return
+        if self.current_thumbnail is not None:
+            self.current_thumbnail.highlight_canvas(False)
         self.current_thumbnail = thumbnail
         self.figure_viewer.load_figure(
             thumbnail.canvas.fig, thumbnail.canvas.fmt)
-        for thumbnail in self._thumbnails:
-            thumbnail.highlight_canvas(thumbnail == self.current_thumbnail)
+        self.current_thumbnail.highlight_canvas(True)
 
     def go_previous_thumbnail(self):
         """Select the thumbnail previous to the currently selected one."""
@@ -978,15 +993,10 @@ class FigureThumbnail(QWidget):
         if highlight:
             # Highlighted figure is not clear in dark mode with blue color.
             # See spyder-ide/spyder#10255.
-            if is_dark_interface():
-                self.canvas.setStyleSheet(
-                    "FigureCanvas{border: 2px solid %s;}" %
-                    qdarkstyle.palette.DarkPalette.COLOR_SELECTION_LIGHT
-                    )
-            else:
-                self.canvas.setStyleSheet(
-                    "FigureCanvas{border: 2px solid %s;}" %
-                    self.canvas.palette().highlight().color().name())
+            self.canvas.setStyleSheet(
+                "FigureCanvas{border: 2px solid %s;}" %
+                QStylePalette.COLOR_ACCENT_3
+            )
         else:
             self.canvas.setStyleSheet("FigureCanvas{}")
 

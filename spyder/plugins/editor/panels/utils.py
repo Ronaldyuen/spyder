@@ -12,7 +12,6 @@ import uuid
 
 # Third-party imports
 from intervaltree import IntervalTree
-import textdistance
 
 # --------------------- Code Folding Panel ------------------------------------
 
@@ -54,7 +53,10 @@ class FoldingRegion:
         for child in self.children[node.index + 1:]:
             child.index -= 1
 
-        self.children.pop(node.index)
+        try:
+            self.children.pop(node.index)
+        except IndexError:
+            pass
         for idx, next_idx in zip(self.children, self.children[1:]):
             assert idx.index < next_idx.index
 
@@ -129,6 +131,10 @@ def merge_interval(parent, node):
 
 def merge_folding(ranges, current_tree, root):
     """Compare previous and current code folding tree information."""
+    # Leave this import here to avoid importing Numpy (which is used by
+    # textdistance) too early at startup.
+    import textdistance
+
     folding_ranges = []
     for starting_line, ending_line, text in ranges:
         if ending_line > starting_line:
@@ -151,7 +157,7 @@ def merge_folding(ranges, current_tree, root):
     while deleted_entry is not None and changed_entry is not None:
         deleted_entry_i = deleted_entry.data
         changed_entry_i = changed_entry.data
-        dist = textdistance.jaccard.normalized_similarity(
+        dist = textdistance.hamming.normalized_similarity(
             deleted_entry_i.text, changed_entry_i.text)
 
         if dist >= 0.80:

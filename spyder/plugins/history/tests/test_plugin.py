@@ -13,9 +13,9 @@ import pytest
 from qtpy.QtGui import QTextOption
 
 # Local imports
+from spyder.config.base import get_conf_path
 from spyder.config.manager import CONF
 from spyder.plugins.history import plugin as history
-from spyder.py3compat import to_text_string
 
 
 # =============================================================================
@@ -33,13 +33,13 @@ def create_file(name, content):
 # Qt Test Fixtures
 # =============================================================================
 @pytest.fixture
-def historylog(qtbot, monkeypatch):
+def historylog(qtbot):
     """
     Return a fixture for base history log, which is a plugin widget.
     """
     historylog = history.HistoryLog(None, configuration=CONF)
     historylog.close = lambda: True
-    qtbot.addWidget(historylog)
+    qtbot.addWidget(historylog.get_widget())
     historylog.get_widget().show()
     yield historylog
     historylog.on_close()
@@ -57,9 +57,9 @@ def test_init(historylog):
     and widgets for a new HistoryLog instance.
     """
     hl = historylog
-    assert hl.get_widget().editors == []
-    assert hl.get_widget().filenames == []
-    assert len(hl.get_actions()) == 2
+    assert len(hl.get_widget().editors) == 1
+    assert len(hl.get_widget().filenames) == 1
+    assert len(hl.get_actions()) == 6
 
 
 def test_add_history(historylog):
@@ -73,30 +73,30 @@ def test_add_history(historylog):
     hw = historylog.get_widget()
 
     # No editors yet.
-    assert len(hw.editors) == 0
+    assert len(hw.editors) == 1
 
     # Add one file.
     name1 = 'test_history.py'
     text1 = 'a = 5\nb= 10\na + b\n'
     path1 = create_file(name1, text1)
     tab1 = os.path.basename(path1)
-    hw.set_option('line_numbers', False)
-    hw.set_option('wrap', False)
+    hw.set_conf('line_numbers', False)
+    hw.set_conf('wrap', False)
     hl.add_history(path1)
 
     # Check tab and editor were created correctly.
-    assert len(hw.editors) == 1
-    assert hw.filenames == [path1]
-    assert hw.tabwidget.currentIndex() == 0
+    assert len(hw.editors) == 2
+    assert hw.filenames == [get_conf_path('history.py'), path1]
+    assert hw.tabwidget.currentIndex() == 1
     assert not hw.editors[0].linenumberarea.isVisible()
     assert hw.editors[0].wordWrapMode() == QTextOption.NoWrap
-    assert hw.tabwidget.tabText(0) == tab1
-    assert hw.tabwidget.tabToolTip(0) == path1
+    assert hw.tabwidget.tabText(1) == tab1
+    assert hw.tabwidget.tabToolTip(1) == path1
 
     # Try to add same file -- does not process filename again, so
     # linenumbers and wrap doesn't change.
     hw.add_history(path1)
-    assert hw.tabwidget.currentIndex() == 0
+    assert hw.tabwidget.currentIndex() == 1
     # assert not hw.editors[0].linenumberarea.isVisible()
 
     # Add another file.
@@ -104,31 +104,30 @@ def test_add_history(historylog):
     text2 = 'random text\nspam line\n\n\n\n'
     path2 = create_file(name2, text2)
     tab2 = os.path.basename(path2)
-    hw.set_option('line_numbers', True)
-    hw.set_option('wrap', True)
+    hw.set_conf('line_numbers', True)
+    hw.set_conf('wrap', True)
     hw.add_history(path2)
 
     # Check second tab and editor were created correctly.
-    assert len(hw.editors) == 2
-    assert hw.filenames == [path1, path2]
-    assert hw.tabwidget.currentIndex() == 1
-    assert hw.editors[1].wordWrapMode() == (
+    assert len(hw.editors) == 3
+    assert hw.filenames == [get_conf_path('history.py'), path1, path2]
+    assert hw.tabwidget.currentIndex() == 2
+    assert hw.editors[2].wordWrapMode() == (
         QTextOption.WrapAtWordBoundaryOrAnywhere)
-    assert hw.editors[1].linenumberarea.isVisible()
-    assert hw.tabwidget.tabText(1) == tab2
-    assert hw.tabwidget.tabToolTip(1) == path2
-    assert hw.filenames == [path1, path2]
+    assert hw.editors[2].linenumberarea.isVisible()
+    assert hw.tabwidget.tabText(2) == tab2
+    assert hw.tabwidget.tabToolTip(2) == path2
 
     # Check differences between tabs based on setup.
-    assert hw.editors[0].supported_language
-    assert hw.editors[0].isReadOnly()
-    assert not hw.editors[0].isVisible()
-    assert hw.editors[0].toPlainText() == text1
-
-    assert not hw.editors[1].supported_language
+    assert hw.editors[1].supported_language
     assert hw.editors[1].isReadOnly()
-    assert hw.editors[1].isVisible()
-    assert hw.editors[1].toPlainText() == text2
+    assert not hw.editors[1].isVisible()
+    assert hw.editors[1].toPlainText() == text1
+
+    assert not hw.editors[2].supported_language
+    assert hw.editors[2].isReadOnly()
+    assert hw.editors[2].isVisible()
+    assert hw.editors[2].toPlainText() == text2
 
 
 def test_append_to_history(qtbot, historylog):
@@ -138,37 +137,36 @@ def test_append_to_history(qtbot, historylog):
     Test adding text to a history file.  Also test the go_to_eof config
     option for positioning the cursor.
     """
-    hl = historylog
     hw = historylog.get_widget()
 
     # Toggle to move to the end of the file after appending.
-    hw.set_option('go_to_eof', True)
+    hw.set_conf('go_to_eof', True)
 
     # Force cursor to the beginning of the file.
     text1 = 'import re\n'
     path1 = create_file('test_history.py', text1)
     hw.add_history(path1)
-    hw.editors[0].set_cursor_position('sof')
+    hw.editors[1].set_cursor_position('sof')
     hw.append_to_history(path1, 'foo = "bar"\n')
-    assert hw.editors[0].toPlainText() == text1 + 'foo = "bar"\n'
-    assert hw.tabwidget.currentIndex() == 0
+    assert hw.editors[1].toPlainText() == text1 + 'foo = "bar"\n'
+    assert hw.tabwidget.currentIndex() == 1
 
     # Cursor moved to end.
-    assert hw.editors[0].is_cursor_at_end()
-    assert not hw.editors[0].linenumberarea.isVisible()
+    assert hw.editors[1].is_cursor_at_end()
+    assert not hw.editors[1].linenumberarea.isVisible()
 
     # Toggle to not move cursor after appending.
-    hw.set_option('go_to_eof', False)
+    hw.set_conf('go_to_eof', False)
 
     # Force cursor to the beginning of the file.
-    hw.editors[0].set_cursor_position('sof')
+    hw.editors[1].set_cursor_position('sof')
     hw.append_to_history(path1, 'a = r"[a-z]"\n')
-    assert hw.editors[0].toPlainText() == ('import re\n'
+    assert hw.editors[1].toPlainText() == ('import re\n'
                                            'foo = "bar"\n'
                                            'a = r"[a-z]"\n')
 
     # Cursor not at end.
-    assert not hw.editors[0].is_cursor_at_end()
+    assert not hw.editors[1].is_cursor_at_end()
 
 
 def test_toggle_wrap_mode(historylog):
@@ -182,20 +180,20 @@ def test_toggle_wrap_mode(historylog):
     hw.add_history(path)
 
     # Starts with wrap mode off.
-    hw.change_option('wrap', False)
-    assert hw.editors[0].wordWrapMode() == QTextOption.NoWrap
-    assert not hw.get_option('wrap')
+    hw.set_conf('wrap', False)
+    assert hw.editors[1].wordWrapMode() == QTextOption.NoWrap
+    assert not hw.get_conf('wrap')
 
     # Toggles wrap mode on.
-    hw.change_option('wrap', True)
-    assert hw.editors[0].wordWrapMode() == (
+    hw.set_conf('wrap', True)
+    assert hw.editors[1].wordWrapMode() == (
         QTextOption.WrapAtWordBoundaryOrAnywhere)
-    assert hw.get_option('wrap')
+    assert hw.get_conf('wrap')
 
     # Toggles wrap mode off.
-    hw.change_option('wrap', False)
-    assert hw.editors[0].wordWrapMode() == QTextOption.NoWrap
-    assert not hw.get_option('wrap')
+    hw.set_conf('wrap', False)
+    assert hw.editors[1].wordWrapMode() == QTextOption.NoWrap
+    assert not hw.get_conf('wrap')
 
 
 def test_toggle_line_numbers(historylog):
@@ -209,19 +207,19 @@ def test_toggle_line_numbers(historylog):
     hw.add_history(path)
 
     # Starts without line numbers.
-    hw.change_option('line_numbers', False)
-    assert not hw.editors[0].linenumberarea.isVisible()
-    assert not hw.get_option('line_numbers')
+    hw.set_conf('line_numbers', False)
+    assert not hw.editors[1].linenumberarea.isVisible()
+    assert not hw.get_conf('line_numbers')
 
     # Toggles line numbers on.
-    hw.change_option('line_numbers', True)
-    assert hw.editors[0].linenumberarea.isVisible()
-    assert hw.get_option('line_numbers')
+    hw.set_conf('line_numbers', True)
+    assert hw.editors[1].linenumberarea.isVisible()
+    assert hw.get_conf('line_numbers')
 
     # Toggles line numbers off.
-    hw.change_option('line_numbers', False)
-    assert not hw.editors[0].linenumberarea.isVisible()
-    assert not hw.get_option('line_numbers')
+    hw.set_conf('line_numbers', False)
+    assert not hw.editors[1].linenumberarea.isVisible()
+    assert not hw.get_conf('line_numbers')
 
 
 if __name__ == "__main__":

@@ -9,13 +9,12 @@
 # Third party imports
 import os.path as osp
 import random
-import sys
 from unittest.mock import patch
 
 from flaky import flaky
 import pytest
 from qtpy.QtCore import Qt
-from qtpy.QtGui import QFont, QTextCursor, QTextFormat
+from qtpy.QtGui import QFont, QTextCursor
 
 # Local imports
 from spyder.plugins.editor.widgets.codeeditor import CodeEditor
@@ -25,26 +24,9 @@ HERE = osp.dirname(osp.realpath(__file__))
 PARENT = osp.dirname(HERE)
 
 
-# --- Fixtures
-# -----------------------------------------------------------------------------
-@pytest.fixture
-def construct_editor(qtbot):
-    """Construct editor for testing decorations."""
-    editor = CodeEditor(parent=None)
-    editor.setup_editor(
-        language='Python',
-        color_scheme='spyder/dark',
-        font=QFont("Monospace", 10),
-    )
-    editor.resize(640, 480)
-    editor.show()
-    qtbot.addWidget(editor)
-    return editor
-
-
-def test_decorations(construct_editor, qtbot):
+def test_decorations(codeeditor, qtbot):
     """Test decorations."""
-    editor = construct_editor
+    editor = codeeditor
 
     # Set random size
     editor.resize(640, random.randint(200, 500))
@@ -187,8 +169,6 @@ def test_update_decorations_when_scrolling(qtbot):
         # Simulate continuously pressing the down arrow key.
         for __ in range(200):
             qtbot.keyPress(editor, Qt.Key_Down)
-            if sys.platform.startswith('linux'):
-                qtbot.wait(5)
 
         # Only one call to _update should be done, after releasing the key.
         qtbot.wait(editor.UPDATE_DECORATIONS_TIMEOUT + 100)
@@ -197,8 +177,6 @@ def test_update_decorations_when_scrolling(qtbot):
         # Simulate continuously pressing the up arrow key.
         for __ in range(200):
             qtbot.keyPress(editor, Qt.Key_Up)
-            if sys.platform.startswith('linux'):
-                qtbot.wait(5)
 
         # Only one call to _update should be done, after releasing the key.
         qtbot.wait(editor.UPDATE_DECORATIONS_TIMEOUT + 100)

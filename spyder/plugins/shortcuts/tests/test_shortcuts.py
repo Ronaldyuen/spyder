@@ -14,9 +14,10 @@ import sys
 
 # Third party imports
 import pytest
-
 from qtpy.QtCore import Qt
+
 # Local imports
+from spyder.config.base import running_in_ci
 from spyder.config.manager import CONF
 from spyder.plugins.shortcuts.widgets.table import (
     INVALID_KEY, NO_WARNING, SEQUENCE_CONFLICT, SEQUENCE_EMPTY,
@@ -58,7 +59,7 @@ class FilterTextMock():
 
 # ---- Tests ShortcutsTable
 @pytest.mark.skipif(
-    sys.platform.startswith('linux') and os.environ.get('CI') is not None,
+    sys.platform.startswith('linux') and running_in_ci(),
     reason="It fails on Linux due to the lack of a proper X server.")
 def test_shortcuts(shortcut_table):
     """Run shortcuts table."""
@@ -120,9 +121,9 @@ def test_shortcut_filtering_context(shortcut_table):
     # Filter by "console"
     shortcut_table.finder = FilterTextMock('console')
     shortcut_table.set_regex()
-    # Verify the number of entries after the regex are 7
+    # Verify the number of entries after the regex are 12
     # If a new shortcut is added to console, this needs to be changed
-    assert shortcut_table.model().rowCount() == 7
+    assert shortcut_table.model().rowCount() == 12
 
     # Filter by "pylint"
     shortcut_table.finder = FilterTextMock('pylint')

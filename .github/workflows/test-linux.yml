@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - master
-      - 5.x
+      - 5.*
       - 4.x
     paths:
       - '.github/scripts/*.sh'
@@ -18,7 +18,7 @@ on:
   pull_request:
     branches:
       - master
-      - 5.x
+      - 5.*
       - 4.x
     paths:
       - '.github/scripts/*.sh'
@@ -46,7 +46,7 @@ jobs:
         INSTALL_TYPE: ['conda', 'pip']
         PYTHON_VERSION: ['3.7']
         TEST_TYPE: ['fast', 'slow']
-
+    timeout-minutes: 120
     steps:
       - name: Checkout Pull Requests
         if: github.event_name == 'pull_request'
@@ -73,7 +73,7 @@ jobs:
           sudo apt-get update --fix-missing
           sudo apt-get install libxcb-randr0-dev libxcb-xtest0-dev libxcb-xinerama0-dev libxcb-shape0-dev libxcb-xkb-dev libegl1-mesa libxkbcommon-x11-0 xterm --fix-missing
       - name: Cache conda
-        uses: actions/cache@v1
+        uses: actions/cache@v2
         env:
           # Increase this value to reset cache if requirements/*.txt has not changed
           CACHE_NUMBER: 0
@@ -82,19 +82,22 @@ jobs:
           key: ${{ runner.os }}-cacheconda-install${{ matrix.INSTALL_TYPE }}-${{ matrix.PYTHON_VERSION }}-${{ env.CACHE_NUMBER }}-${{ hashFiles('requirements/*.txt') }}
       - name: Cache pip
         if: env.RUN_BUILD == 'true'
-        uses: actions/cache@v1
+        uses: actions/cache@v2
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-cachepip-install${{ matrix.INSTALL_TYPE }}-${{ env.CACHE_NUMBER }}-${{ hashFiles('requirements/*.txt') }}
+          key: ${{ runner.os }}-cachepip-install${{ matrix.INSTALL_TYPE }}-${{ env.CACHE_NUMBER }}-${{ hashFiles('setup.py') }}
       - name: Install Conda
         if: env.RUN_BUILD == 'true'
         uses: conda-incubator/setup-miniconda@v2
         with:
           activate-environment: test
-          auto-update-conda: true
+          auto-update-conda: false
           auto-activate-base: false
           python-version: ${{ matrix.PYTHON_VERSION }}
           use-only-tar-bz2: true
+          channels: conda-forge,defaults
+          channel-priority: strict
+          miniforge-variant: Mambaforge
       - name: Create test environment
         if: env.RUN_BUILD == 'true'
         shell: bash -l {0}
@@ -112,8 +115,12 @@ jobs:
       - name: Run tests
         if: env.RUN_BUILD == 'true'
         shell: bash -l {0}
-        run: xvfb-run --auto-servernum python runtests.py || xvfb-run --auto-servernum python runtests.py
+        run: xvfb-run --auto-servernum python runtests.py || xvfb-run --auto-servernum python runtests.py || xvfb-run --auto-servernum python runtests.py || xvfb-run --auto-servernum python runtests.py || xvfb-run --auto-servernum python runtests.py
       - name: Coverage
         if: env.RUN_BUILD == 'true'
         shell: bash -l {0}
         run: codecov
+      # Enable this if SSH debugging is required
+      # - name: Setup tmate session
+      #   uses: andfoy/action-tmate@69bac54a5cc0abe008e87d7470fbf65733745aea
+      #   if: ${{ failure() }}

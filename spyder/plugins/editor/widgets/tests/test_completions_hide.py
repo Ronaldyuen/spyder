@@ -14,15 +14,15 @@ from qtpy.QtCore import Qt
 
 
 @pytest.mark.slow
-@pytest.mark.first
+@pytest.mark.order(1)
 @flaky(max_runs=5)
-def test_automatic_completions_hide_complete(lsp_codeeditor, qtbot):
+def test_automatic_completions_hide_complete(completions_codeeditor, qtbot):
     """Test on-the-fly completion closing when already complete.
 
     Regression test for issue #11600 and pull requests #11824, #12140
     and #12710.
     """
-    code_editor, _ = lsp_codeeditor
+    code_editor, _ = completions_codeeditor
     completion = code_editor.completion_widget
     code_editor.toggle_code_snippets(False)
 
@@ -86,16 +86,16 @@ def test_automatic_completions_hide_complete(lsp_codeeditor, qtbot):
 
 
 @pytest.mark.slow
-@pytest.mark.first
+@pytest.mark.order(1)
 @flaky(max_runs=5)
-def test_automatic_completions_widget_visible(lsp_codeeditor, qtbot):
+def test_automatic_completions_widget_visible(completions_codeeditor, qtbot):
     """
     Test on-the-fly completions when the widget is visible and the Backspace
     key is pressed.
 
     Regression test for PR #12710
     """
-    code_editor, _ = lsp_codeeditor
+    code_editor, _ = completions_codeeditor
     completion = code_editor.completion_widget
     code_editor.toggle_code_snippets(False)
 

@@ -24,10 +24,10 @@ from qtpy.QtWidgets import (QGridLayout, QHBoxLayout, QLabel,
 from spyder.config.base import _
 from spyder.config.manager import CONF
 from spyder.py3compat import to_text_string
-from spyder.utils import icon_manager as ima
+from spyder.utils.icon_manager import ima
 from spyder.utils.misc import regexp_error_msg
 from spyder.plugins.editor.utils.editor import TextHelper
-from spyder.utils.qthelpers import create_toolbutton, get_icon
+from spyder.utils.qthelpers import create_toolbutton
 from spyder.utils.sourcecode import get_eol_chars
 from spyder.widgets.comboboxes import PatternComboBox
 
@@ -43,10 +43,10 @@ def is_position_inf(pos1, pos2):
 
 class FindReplace(QWidget):
     """Find widget"""
-    STYLE = {False: "background-color:rgb(255, 175, 90);",
+    STYLE = {False: "background-color:'#F37E12';",
              True: "",
              None: "",
-             'regexp_error': "background-color:rgb(255, 80, 80);",
+             'regexp_error': "background-color:'#E74C3C';",
              }
     TOOLTIP = {False: _("No matches"),
                True: _("Search string"),
@@ -62,6 +62,11 @@ class FindReplace(QWidget):
         self.enable_replace = enable_replace
         self.editor = None
         self.is_code_editor = None
+        self.setStyleSheet(
+             "QComboBox {"
+             "padding-right: 0px;"
+             "padding-left: 0px;"
+             "}")
 
         glayout = QGridLayout()
         glayout.setContentsMargins(0, 0, 0, 0)
@@ -98,11 +103,11 @@ class FindReplace(QWidget):
         )
         self.previous_button = create_toolbutton(self,
                                                  triggered=self.find_previous,
-                                                 icon=ima.icon('ArrowUp'),
+                                                 icon=ima.icon('findprevious'),
                                                  tip=_("Find previous"))
         self.next_button = create_toolbutton(self,
                                              triggered=self.find_next,
-                                             icon=ima.icon('ArrowDown'),
+                                             icon=ima.icon('findnext'),
                                              tip=_("Find next"))
         self.next_button.clicked.connect(self.update_search_combo)
         self.previous_button.clicked.connect(self.update_search_combo)
@@ -120,23 +125,17 @@ class FindReplace(QWidget):
         self.case_button.toggled.connect(lambda state: self.find())
 
         self.words_button = create_toolbutton(self,
-                                              icon=get_icon("whole_words.png"),
+                                              icon=ima.icon("whole_words"),
                                               tip=_("Whole words"))
         self.words_button.setCheckable(True)
         self.words_button.toggled.connect(lambda state: self.find())
-
-        self.highlight_button = create_toolbutton(self,
-                                              icon=get_icon("highlight.png"),
-                                              tip=_("Highlight matches"))
-        self.highlight_button.setCheckable(True)
-        self.highlight_button.toggled.connect(self.toggle_highlighting)
 
         hlayout = QHBoxLayout()
         self.widgets = [self.close_button, self.search_text,
                         self.number_matches_text, self.replace_text_button,
                         self.previous_button, self.next_button,
                         self.re_button, self.case_button,
-                        self.words_button, self.highlight_button]
+                        self.words_button]
         for widget in self.widgets[1:]:
             hlayout.addWidget(widget)
         glayout.addLayout(hlayout, 0, 1)
@@ -186,7 +185,7 @@ class FindReplace(QWidget):
 
         self.highlight_timer = QTimer(self)
         self.highlight_timer.setSingleShot(True)
-        self.highlight_timer.setInterval(1000)
+        self.highlight_timer.setInterval(300)
         self.highlight_timer.timeout.connect(self.highlight_matches)
         self.search_text.installEventFilter(self)
 
@@ -197,6 +196,12 @@ class FindReplace(QWidget):
         This signals are used for search forward and backward.
         Also, a crude hack to get tab working in the Find/Replace boxes.
         """
+
+        # Type check: Prevent error in PySide where 'event' may be of type
+        # QtGui.QPainter (for whatever reason).
+        if not isinstance(event, QEvent):
+            return True
+
         if event.type() == QEvent.KeyPress:
             key = event.key()
             shift = event.modifiers() & Qt.ShiftModifier
@@ -374,7 +379,6 @@ class FindReplace(QWidget):
         self.re_button.setVisible(not isinstance(editor, QWebEngineView))
         from spyder.plugins.editor.widgets.codeeditor import CodeEditor
         self.is_code_editor = isinstance(editor, CodeEditor)
-        self.highlight_button.setVisible(self.is_code_editor)
         if refresh:
             self.refresh()
         if self.isHidden() and editor is not None:
@@ -406,7 +410,7 @@ class FindReplace(QWidget):
 
     def highlight_matches(self):
         """Highlight found results"""
-        if self.is_code_editor and self.highlight_button.isChecked():
+        if self.is_code_editor:
             text = self.search_text.currentText()
             case = self.case_button.isChecked()
             word = self.words_button.isChecked()
@@ -436,6 +440,7 @@ class FindReplace(QWidget):
                 # Clears the selection for WebEngine
                 self.editor.find_text('')
             self.change_number_matches()
+            self.clear_matches()
             return None
         else:
             case = self.case_button.isChecked()

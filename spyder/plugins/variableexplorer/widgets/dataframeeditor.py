@@ -84,6 +84,7 @@ from qtpy.QtWidgets import (QApplication, QCheckBox, QDialog, QGridLayout,
                             QMessageBox, QPushButton, QTableView,
                             QScrollBar, QTableWidget, QFrame,
                             QItemDelegate, QHeaderView, QLabel)
+from spyder_kernels.utils.lazymodules import numpy as np, pandas as pd
 from PyQt5.QtCore import pyqtSignal, QRect
 from pandas import DataFrame, Index, Series, isna
 
@@ -94,13 +95,13 @@ except ImportError:  # For pandas version < 0.20
 import numpy as np
 import pandas as pd
 # Local imports
+from spyder.api.config.mixins import SpyderConfigurationAccessor
 from spyder.config.base import _
 from spyder.config.fonts import DEFAULT_SMALL_DELTA
 from spyder.config.gui import get_font
-from spyder.config.manager import CONF
 from spyder.py3compat import (io, is_text_string, is_type_text_string, PY2,
                               to_text_string, perf_counter)
-from spyder.utils import icon_manager as ima
+from spyder.utils.icon_manager import ima
 from spyder.utils.qthelpers import (add_actions, create_action,
                                     keybinding, qapplication)
 from spyder.plugins.variableexplorer.widgets.arrayeditor import get_idx_rect
@@ -311,7 +312,8 @@ def global_max(col_vals, index):
 
 
 class DataFrameModel(QAbstractTableModel):
-    """ DataFrame Table Model.
+    """
+    DataFrame Table Model.
 
     Partly based in ExtDataModel and ExtFrameModel classes
     of the gtabview project.
@@ -610,7 +612,7 @@ class DataFrameModel(QAbstractTableModel):
         if not self.bgcolor_enabled:
             return
         value = self.get_value(index.row(), column)
-        if self.max_min_col[column] is None or isna(value):
+        if self.max_min_col[column] is None or pd.isna(value):
             color = QColor(BACKGROUND_NONNUMBER_COLOR)
             if is_text_string(value):
                 # transparency
@@ -662,7 +664,7 @@ class DataFrameModel(QAbstractTableModel):
         # handling, so fallback uses iloc
         try:
             value = self.df.iat[row, column]
-        except OutOfBoundsDatetime:
+        except pd._libs.tslib.OutOfBoundsDatetime:
             value = self.df.iloc[:, column].astype(str).iat[row]
         except:
             value = self.df.iloc[row, column]
@@ -904,13 +906,12 @@ class DataFrameModel(QAbstractTableModel):
         df.drop(self._INDEX_TRACKER_NAME, axis=1, inplace=True)
 
 
-class DataFrameView(QTableView):
+class DataFrameView(QTableView, SpyderConfigurationAccessor):
     """
     Data Frame view class.
 
     Signals
     -------
-    sig_option_changed(): Raised after a sort by column.
     sig_sort_by_column(): Raised after more columns are fetched.
     sig_fetch_more_rows(): Raised after more rows are fetched.
     """
@@ -920,6 +921,8 @@ class DataFrameView(QTableView):
     sig_reset_and_scroll_to = Signal()
     sig_reset_sort_indicator = Signal()
     sig_top_left_label_update = Signal()
+
+    CONF_SECTION = 'variable_explorer'
 
     def __init__(self, parent, model, header, hscroll, vscroll):
         """Constructor."""
@@ -936,11 +939,7 @@ class DataFrameView(QTableView):
         self.header_class = header
         self.header_class.sectionClicked.connect(self.sortByColumn)
         self.menu = self.setup_menu()
-        CONF.config_shortcut(
-            self.copy,
-            context='variable_explorer',
-            name='copy',
-            parent=self)
+        self.config_shortcut(self.copy, 'copy', self)
         self.horizontalScrollBar().valueChanged.connect(
             self._load_more_columns)
         self.verticalScrollBar().valueChanged.connect(self._load_more_rows)
@@ -1212,7 +1211,7 @@ class DataFrameHeaderModel(QAbstractTableModel):
         """Get the information to put in the header."""
         if role == Qt.TextAlignmentRole:
             if orientation == Qt.Horizontal:
-                return Qt.AlignCenter | Qt.AlignBottom
+                return Qt.AlignCenter
             else:
                 return Qt.AlignRight | Qt.AlignVCenter
         if role != Qt.DisplayRole and role != Qt.ToolTipRole:
@@ -1304,7 +1303,7 @@ class DataFrameLevelModel(QAbstractTableModel):
         """
         if role == Qt.TextAlignmentRole:
             if orientation == Qt.Horizontal:
-                return Qt.AlignCenter | Qt.AlignBottom
+                return Qt.AlignCenter
             else:
                 return Qt.AlignRight | Qt.AlignVCenter
         if role != Qt.DisplayRole and role != Qt.ToolTipRole:
@@ -1341,23 +1340,19 @@ class DataFrameLevelModel(QAbstractTableModel):
         return None
 
 
-class DataFrameEditor(BaseDialog):
+class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
     """
     Dialog for displaying and editing DataFrame and related objects.
 
     Based on the gtabview project (ExtTableView).
     For more information please see:
     https://github.com/wavexx/gtabview/blob/master/gtabview/viewer.py
-
-    Signals
-    -------
-    sig_option_changed(str, object): Raised if an option is changed.
-       Arguments are name of option and its new value.
     """
-    sig_option_changed = Signal(str, object)
+    CONF_SECTION = 'variable_explorer'
 
     def __init__(self, parent=None):
-        QDialog.__init__(self, parent)
+        super().__init__(parent)
+
         # Destroying the C++ object right after closing the dialog box,
         # otherwise it may be garbage-collected in another QThread
         # (e.g. the editor's analysis thread in Spyder), thus leading to
@@ -1379,20 +1374,19 @@ class DataFrameEditor(BaseDialog):
 
         self.layout = QGridLayout()
         self.layout.setSpacing(0)
-        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setContentsMargins(20, 20, 20, 0)
         self.setLayout(self.layout)
-        self.setWindowIcon(ima.icon('arredit'))
         # title = name of the dataframe in python
         self.df_name = title if title else "df"
         if title:
             title = to_text_string(title) + " - %s" % data.__class__.__name__
         else:
             title = _("%s editor") % data.__class__.__name__
-        if isinstance(data, Series):
+        if isinstance(data, pd.Series):
             self.is_series = True
             data = data.to_frame()
-        elif isinstance(data, Index):
-            data = DataFrame(data)
+        elif isinstance(data, pd.Index):
+            data = pd.DataFrame(data)
 
         self.setWindowTitle(title)
 
@@ -1445,11 +1439,12 @@ class DataFrameEditor(BaseDialog):
         # Make the dialog act as a window
         self.setWindowFlags(Qt.Window)
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(5)
 
-        btn = QPushButton(_("Format"))
+        btn_format = QPushButton(_("Format"))
         # disable format button for int type
-        btn_layout.addWidget(btn)
-        btn.clicked.connect(self.change_format)
+        btn_layout.addWidget(btn_format)
+        btn_format.clicked.connect(self.change_format)
         # btn = QPushButton(_('Resize'))
         # btn_layout.addWidget(btn)
         # btn.clicked.connect(self.resize_to_contents)
@@ -1501,7 +1496,7 @@ class DataFrameEditor(BaseDialog):
         self.btn_close.clicked.connect(self.reject)
         btn_layout.addWidget(self.btn_close)
 
-        btn_layout.setContentsMargins(4, 4, 4, 4)
+        btn_layout.setContentsMargins(0, 16, 0, 16)
         self.layout.addLayout(btn_layout, 4, 0, 1, 2)
         self.setModel(self.dataModel, relayout=True)
         self.resizeIndexColumnAtInitialization()
@@ -1879,9 +1874,6 @@ class DataFrameEditor(BaseDialog):
     def change_format(self):
         """
         Ask user for display format for floats and use it.
-
-        This function also checks whether the format is valid and emits
-        `sig_option_changed`.
         """
         format, valid = QInputDialog.getText(self, _('Format'),
                                              _("Float formatting"),
@@ -1900,7 +1892,9 @@ class DataFrameEditor(BaseDialog):
                 QMessageBox.critical(self, _("Error"), msg)
                 return
             self.dataModel.set_format(format)
-            self.sig_option_changed.emit('dataframe_format', format)
+
+            format = format[1:]
+            self.set_conf('dataframe_format', format)
 
     def get_value(self):
         """Return modified Dataframe -- this is *not* a copy"""

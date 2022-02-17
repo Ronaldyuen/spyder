@@ -10,25 +10,31 @@ Toolbar Container.
 
 # Standard library imports
 from collections import OrderedDict
+from spyder.utils.qthelpers import SpyderAction
+from typing import Optional, Union, Tuple, Dict, List
 
 # Third party imports
-from qtpy.QtCore import QSize, Qt, Signal, Slot
-from qtpy.QtWidgets import QMenu, QToolBar
+from qtpy.QtCore import QSize, Slot
+from qtpy.QtWidgets import QAction, QWidget
+from qtpy import PYSIDE2
 
 # Local imports
 from spyder.api.exceptions import SpyderAPIError
 from spyder.api.translations import get_translation
-from spyder.api.widgets import PluginMainContainer
+from spyder.api.widgets.main_container import PluginMainContainer
 from spyder.api.utils import get_class_values
 from spyder.api.widgets.toolbars import ApplicationToolbar
 from spyder.plugins.toolbar.api import ApplicationToolbars
+from spyder.utils.registries import TOOLBAR_REGISTRY
+
 
 # Localization
 _ = get_translation('spyder')
 
+# Type annotations
+ToolbarItem = Union[SpyderAction, QWidget]
+ItemInfo = Tuple[ToolbarItem, Optional[str], Optional[str], Optional[str]]
 
-# --- Constants
-# ------------------------------------------------------------------------
 
 class ToolbarMenus:
     ToolbarsMenu = "toolbars_menu"
@@ -43,21 +49,28 @@ class ToolbarActions:
     ShowToolbars = "show toolbars"
 
 
-class ToolbarContainer(PluginMainContainer):
-    DEFAULT_OPTIONS = {
-        'last_visible_toolbars': [],
-        'toolbars_visible': True,
-    }
+class QActionID(QAction):
+    """Wrapper class around QAction that allows to set/get an identifier."""
+    @property
+    def action_id(self):
+        return self._action_id
 
-    def __init__(self, name, plugin, parent=None, options=DEFAULT_OPTIONS):
-        super().__init__(name, plugin, parent=parent, options=options)
+    @action_id.setter
+    def action_id(self, act):
+        self._action_id = act
+
+
+class ToolbarContainer(PluginMainContainer):
+    def __init__(self, name, plugin, parent=None):
+        super().__init__(name, plugin, parent=parent)
 
         self._APPLICATION_TOOLBARS = OrderedDict()
         self._ADDED_TOOLBARS = OrderedDict()
         self._toolbarslist = []
         self._visible_toolbars = []
+        self._ITEMS_QUEUE = {}  # type: Dict[str, List[ItemInfo]]
 
-    # --- Private Methods
+    # ---- Private Methods
     # ------------------------------------------------------------------------
     def _save_visible_toolbars(self):
         """Save the name of the visible toolbars in the options."""
@@ -65,7 +78,7 @@ class ToolbarContainer(PluginMainContainer):
         for toolbar in self._visible_toolbars:
             toolbars.append(toolbar.objectName())
 
-        self.set_option('last_visible_toolbars', toolbars)
+        self.set_conf('last_visible_toolbars', toolbars)
 
     def _get_visible_toolbars(self):
         """Collect the visible toolbars."""
@@ -80,41 +93,42 @@ class ToolbarContainer(PluginMainContainer):
     @Slot()
     def _show_toolbars(self):
         """Show/Hide toolbars."""
-        value = not self.get_option("toolbars_visible")
-        self.set_option("toolbars_visible", value)
+        value = not self.get_conf("toolbars_visible")
+        self.set_conf("toolbars_visible", value)
         if value:
             self._save_visible_toolbars()
         else:
             self._get_visible_toolbars()
 
         for toolbar in self._visible_toolbars:
-            toolbar.toggleViewAction().setChecked(value)
             toolbar.setVisible(value)
 
         self.update_actions()
 
-    # --- PluginMainContainer API
+    def _add_missing_toolbar_elements(self, toolbar, toolbar_id):
+        if toolbar_id in self._ITEMS_QUEUE:
+            pending_items = self._ITEMS_QUEUE.pop(toolbar_id)
+            for item, section, before, before_section in pending_items:
+                toolbar.add_item(item, section=section, before=before,
+                                 before_section=before_section)
+
+    # ---- PluginMainContainer API
     # ------------------------------------------------------------------------
-    def setup(self, options=DEFAULT_OPTIONS):
+    def setup(self):
         self.show_toolbars_action = self.create_action(
             ToolbarActions.ShowToolbars,
             text=_("Show toolbars"),
-            triggered=self._show_toolbars,
-            context=Qt.ApplicationShortcut,
-            shortcut_context="_",
-            register_shortcut=True
+            triggered=self._show_toolbars
         )
 
         self.toolbars_menu = self.create_menu(
             ToolbarMenus.ToolbarsMenu,
             _("Toolbars"),
         )
-
-    def on_option_update(self, options, value):
-        pass
+        self.toolbars_menu.setObjectName('checkbox-padding')
 
     def update_actions(self):
-        if self.get_option("toolbars_visible"):
+        if self.get_conf("toolbars_visible"):
             text = _("Hide toolbars")
             tip = _("Hide toolbars")
         else:
@@ -124,9 +138,10 @@ class ToolbarContainer(PluginMainContainer):
         self.show_toolbars_action.setText(text)
         self.show_toolbars_action.setToolTip(tip)
 
-    # --- Public API
+    # ---- Public API
     # ------------------------------------------------------------------------
-    def create_application_toolbar(self, toolbar_id, title):
+    def create_application_toolbar(
+            self, toolbar_id: str, title: str) -> ApplicationToolbar:
         """
         Create an application toolbar and add it to the main window.
 
@@ -149,8 +164,12 @@ class ToolbarContainer(PluginMainContainer):
         toolbar = ApplicationToolbar(self, title)
         toolbar.ID = toolbar_id
         toolbar.setObjectName(toolbar_id)
+
+        TOOLBAR_REGISTRY.register_reference(
+            toolbar, toolbar_id, self.PLUGIN_NAME, self.CONTEXT_NAME)
         self._APPLICATION_TOOLBARS[toolbar_id] = toolbar
 
+        self._add_missing_toolbar_elements(toolbar, toolbar_id)
         return toolbar
 
     def add_application_toolbar(self, toolbar, mainwindow=None):
@@ -192,9 +211,38 @@ class ToolbarContainer(PluginMainContainer):
         if mainwindow:
             mainwindow.addToolBar(toolbar)
 
-    def add_item_to_application_toolbar(self, item, toolbar=None, toolbar_id=None,
-                                        section=None, before=None,
-                                        before_section=None):
+        self._add_missing_toolbar_elements(toolbar, toolbar_id)
+
+    def remove_application_toolbar(self, toolbar_id: str, mainwindow=None):
+        """
+        Remove toolbar from application toolbars.
+
+        Parameters
+        ----------
+        toolbar: str
+            The application toolbar to remove from the `mainwindow`.
+        mainwindow: QMainWindow
+            The main application window.
+        """
+
+        if toolbar_id not in self._ADDED_TOOLBARS:
+            raise SpyderAPIError(
+                'Toolbar with ID "{}" is not in the main window'.format(
+                    toolbar_id))
+
+        toolbar = self._ADDED_TOOLBARS.pop(toolbar_id)
+        self._toolbarslist.remove(toolbar)
+
+        if mainwindow:
+            mainwindow.removeToolBar(toolbar)
+
+    def add_item_to_application_toolbar(self,
+                                        item: ToolbarItem,
+                                        toolbar_id: Optional[str] = None,
+                                        section: Optional[str] = None,
+                                        before: Optional[str] = None,
+                                        before_section: Optional[str] = None,
+                                        omit_id: bool = False):
         """
         Add action or widget `item` to given application toolbar `section`.
 
@@ -202,8 +250,6 @@ class ToolbarContainer(PluginMainContainer):
         ----------
         item: SpyderAction or QWidget
             The item to add to the `toolbar`.
-        toolbar: ApplicationToolbar or None
-            Instance of a Spyder application toolbar.
         toolbar_id: str or None
             The application toolbar unique string identifier.
         section: str or None
@@ -213,33 +259,40 @@ class ToolbarContainer(PluginMainContainer):
         before_section: str or None
             Make the item defined section appear before another given section
             (the section must be already defined).
-
-        Notes
-        -----
-        Must provide a `toolbar` or a `toolbar_id`.
+        omit_id: bool
+            If True, then the toolbar will check if the item to add declares an
+            id, False otherwise. This flag exists only for items added on
+            Spyder 4 plugins. Default: False
         """
-        if toolbar and toolbar_id:
-            raise SpyderAPIError('Must provide only toolbar or toolbar_id!')
+        if toolbar_id not in self._APPLICATION_TOOLBARS:
+            pending_items = self._ITEMS_QUEUE.get(toolbar_id, [])
+            pending_items.append((item, section, before, before_section))
+            self._ITEMS_QUEUE[toolbar_id] = pending_items
+        else:
+            toolbar = self.get_application_toolbar(toolbar_id)
+            toolbar.add_item(item, section=section, before=before,
+                             before_section=before_section, omit_id=omit_id)
 
-        if toolbar is None and toolbar_id is None:
-            raise SpyderAPIError(
-                'Must provide at least toolbar or toolbar_id!')
+    def remove_item_from_application_toolbar(self, item_id: str,
+                                             toolbar_id: Optional[str] = None):
+        """
+        Remove action or widget from given application toolbar by id.
 
-        if toolbar and not isinstance(toolbar, ApplicationToolbar):
-            raise SpyderAPIError('Not an `ApplicationToolbar`!')
-
-        if toolbar_id and toolbar_id not in self._APPLICATION_TOOLBARS:
+        Parameters
+        ----------
+        item: str
+            The item to remove from the `toolbar`.
+        toolbar_id: str or None
+            The application toolbar unique string identifier.
+        """
+        if toolbar_id not in self._APPLICATION_TOOLBARS:
             raise SpyderAPIError(
                 '{} is not a valid toolbar_id'.format(toolbar_id))
 
-        toolbar_id = toolbar_id if toolbar_id else toolbar.ID
-        toolbar = toolbar if toolbar else self.get_application_toolbar(
-            toolbar_id)
+        toolbar = self.get_application_toolbar(toolbar_id)
+        toolbar.remove_item(item_id)
 
-        toolbar.add_item(item, section=section, before=before,
-                         before_section=before_section)
-
-    def get_application_toolbar(self, toolbar_id):
+    def get_application_toolbar(self, toolbar_id: str) -> ApplicationToolbar:
         """
         Return an application toolbar by toolbar_id.
 
@@ -277,7 +330,7 @@ class ToolbarContainer(PluginMainContainer):
 
     def load_last_visible_toolbars(self):
         """Load the last visible toolbars from our preferences.."""
-        toolbars_names = self.get_option('last_visible_toolbars')
+        toolbars_names = self.get_conf('last_visible_toolbars')
 
         if toolbars_names:
             toolbars_dict = {}
@@ -293,6 +346,9 @@ class ToolbarContainer(PluginMainContainer):
         else:
             self._get_visible_toolbars()
 
+        for toolbar in self._visible_toolbars:
+            toolbar.setVisible(True)
+
         self.update_actions()
 
     def create_toolbars_menu(self):
@@ -306,6 +362,18 @@ class ToolbarContainer(PluginMainContainer):
         for toolbar_id, toolbar in self._ADDED_TOOLBARS.items():
             if toolbar:
                 action = toolbar.toggleViewAction()
+                if not PYSIDE2:
+                    # Modifying __class__ of a QObject created by C++ [1] seems
+                    # to invalidate the corresponding Python object when PySide
+                    # is used (changing __class__ of a QObject created in
+                    # Python seems to work).
+                    #
+                    # [1] There are Qt functions such as
+                    # QToolBar.toggleViewAction(), QToolBar.addAction(QString)
+                    # and QMainWindow.addToolbar(QString), which return a
+                    # pointer to an already existing QObject.
+                    action.__class__ = QActionID
+                action.action_id = f'toolbar_{toolbar_id}'
                 section = (
                     main_section
                     if toolbar_id in default_toolbars

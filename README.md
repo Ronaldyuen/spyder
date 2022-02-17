@@ -1,4 +1,4 @@
-![Spyder — The Scientific Python Development Environment](https://raw.githubusercontent.com/spyder-ide/spyder/master/img_src/spyder_readme_banner.png)
+![Spyder — The Scientific Python Development Environment](https://raw.githubusercontent.com/spyder-ide/spyder/master/branding/logo/spyder_readme_banner.png)
 
 *Copyright © 2009–2021 [Spyder Project Contributors](
 https://github.com/spyder-ide/spyder/graphs/contributors)*
@@ -26,17 +26,11 @@ https://github.com/spyder-ide/spyder/graphs/contributors)*
 [![codecov](https://codecov.io/gh/spyder-ide/spyder/branch/master/graph/badge.svg)](https://codecov.io/gh/spyder-ide/spyder)
 [![Crowdin](https://badges.crowdin.net/spyder/localized.svg)](https://crowdin.com/project/spyder)
 
-![Screenshot of Spyder's main window](https://raw.githubusercontent.com/spyder-ide/spyder/master/img_src/screenshot.png)
+![Screenshot of Spyder's main window](https://raw.githubusercontent.com/spyder-ide/spyder/5.x/img_src/screenshot.png)
 
 ----
 
 ## Help support Spyder, the community-developed scientific IDE!
-
-Thanks to your continuing support, we are on track for a
-Spyder 4 release in early 2019 with all of your most-requested features
-(a new debugger and completion architecture, better Projects, new Editor
-functionality, full Variable Explorer object support, a built-in dark theme
-and [much more](https://github.com/spyder-ide/spyder/wiki/Roadmap))!
 
 Spyder development is made possible by contributions from our global user
 community, along with organizations like [NumFOCUS](https://www.numfocus.org)
@@ -195,14 +189,14 @@ to install them separately in those cases.
 ### Build dependencies
 
 When installing Spyder from its source package, the only requirement is to have
-a Python version equal or greater than 3.6.
+a Python version equal or greater than 3.7.
 
 ### Runtime dependencies
 
 The basic dependencies to run Spyder are:
 
-* **Python** 3.6+: The core language Spyder is written in and for.
-* **PyQt5** 5.6+: Python bindings for Qt, used for Spyder's GUI.
+* **Python** 3.7+: The core language Spyder is written in and for.
+* **PyQt5** 5.9+: Python bindings for Qt, used for Spyder's GUI.
 
 The rest our dependencies (both required and optional) are declared in
 [this file](https://github.com/spyder-ide/spyder/blob/master/spyder/dependencies.py).
@@ -213,7 +207,7 @@ The rest our dependencies (both required and optional) are declared in
 Spyder is funded thanks to the generous support of
 
 
-[![Quansight](https://static.wixstatic.com/media/095d2c_2508c560e87d436ea00357abc404cf1d~mv2.png/v1/crop/x_0,y_9,w_915,h_329/fill/w_380,h_128,al_c,usm_0.66_1.00_0.01/095d2c_2508c560e87d436ea00357abc404cf1d~mv2.png)](https://www.quansight.com/)[![Numfocus](https://i2.wp.com/numfocus.org/wp-content/uploads/2017/07/NumFocus_LRG.png?fit=320%2C148&ssl=1)](https://numfocus.org/)
+[![Quansight](https://user-images.githubusercontent.com/16781833/142477716-53152d43-99a0-470c-a70b-c04bbfa97dd4.png)](https://www.quansight.com/)[![Numfocus](https://i2.wp.com/numfocus.org/wp-content/uploads/2017/07/NumFocus_LRG.png?fit=320%2C148&ssl=1)](https://numfocus.org/)
 
 
 and the donations we have received from our users around the world through [Open Collective](https://opencollective.com/spyder/):

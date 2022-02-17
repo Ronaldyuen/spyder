@@ -12,13 +12,16 @@ Pylint Code Analysis Plugin.
 import os.path as osp
 
 # Third party imports
-from qtpy.QtCore import Signal, Slot
+from qtpy.QtCore import Qt, Signal, Slot
 
 # Local imports
-from spyder.plugins.mainmenu.api import ApplicationMenus
-from spyder.api.translations import get_translation
+from spyder.api.exceptions import SpyderAPIError
 from spyder.api.plugins import Plugins, SpyderDockablePlugin
+from spyder.api.plugin_registration.decorators import (
+    on_plugin_available, on_plugin_teardown)
+from spyder.api.translations import get_translation
 from spyder.utils.programs import is_module_installed
+from spyder.plugins.mainmenu.api import ApplicationMenus
 from spyder.plugins.pylint.confpage import PylintConfigPage
 from spyder.plugins.pylint.main_widget import (PylintWidget,
                                                PylintWidgetActions)
@@ -26,6 +29,10 @@ from spyder.plugins.pylint.main_widget import (PylintWidget,
 
 # Localization
 _ = get_translation("spyder")
+
+
+class PylintActions:
+    AnalyzeCurrentFile = 'run analysis'
 
 
 class Pylint(SpyderDockablePlugin):
@@ -55,23 +62,18 @@ class Pylint(SpyderDockablePlugin):
         Word to select on given row.
     """
 
-    def get_name(self):
+    @staticmethod
+    def get_name():
         return _("Code Analysis")
 
     def get_description(self):
         return _("Run Code Analysis.")
 
     def get_icon(self):
-        path = osp.join(self.get_path(), self.IMG_PATH)
-        return self.create_icon("pylint", path=path)
+        return self.create_icon("pylint")
 
-    def register(self):
+    def on_initialize(self):
         widget = self.get_widget()
-        editor = self.get_plugin(Plugins.Editor)
-        mainmenu = self.get_plugin(Plugins.MainMenu)
-        preferences = self.get_plugin(Plugins.Preferences)
-
-        preferences.register_plugin_preferences(self)
 
         # Expose widget signals at the plugin level
         widget.sig_edit_goto_requested.connect(self.sig_edit_goto_requested)
@@ -80,29 +82,89 @@ class Pylint(SpyderDockablePlugin):
         widget.sig_start_analysis_requested.connect(
             lambda: self.start_code_analysis())
 
+        # Add action to application menus
+        pylint_act = self.create_action(
+            PylintActions.AnalyzeCurrentFile,
+            text=_("Run code analysis"),
+            tip=_("Run code analysis"),
+            icon=self.create_icon("pylint"),
+            triggered=lambda: self.start_code_analysis(),
+            context=Qt.ApplicationShortcut,
+            register_shortcut=True
+        )
+        pylint_act.setEnabled(is_module_installed("pylint"))
+
+    @on_plugin_available(plugin=Plugins.Editor)
+    def on_editor_available(self):
+        widget = self.get_widget()
+        editor = self.get_plugin(Plugins.Editor)
+
         # Connect to Editor
         widget.sig_edit_goto_requested.connect(editor.load)
         editor.sig_editor_focus_changed.connect(self._set_filename)
 
-        # Connect to projects
-        projects = self.get_plugin(Plugins.Projects)
-        if projects:
-            projects.sig_project_loaded.connect(
-                lambda value: widget.change_option("project_dir", value))
-            projects.sig_project_closed.connect(
-                lambda value: widget.change_option("project_dir", None))
-
-        # Add action to application menus
-        pylint_act = self.get_action(PylintWidgetActions.RunCodeAnalysis)
-        pylint_act.setEnabled(is_module_installed("pylint"))
-
-        if mainmenu:
-            source_menu = mainmenu.get_application_menu(
-                ApplicationMenus.Source)
-            mainmenu.add_item_to_application_menu(pylint_act, menu=source_menu)
+        pylint_act = self.get_action(PylintActions.AnalyzeCurrentFile)
 
         # TODO: use new API when editor has migrated
-        self.main.editor.pythonfile_dependent_actions += [pylint_act]
+        editor.pythonfile_dependent_actions += [pylint_act]
+
+    @on_plugin_available(plugin=Plugins.Preferences)
+    def on_preferences_available(self):
+        preferences = self.get_plugin(Plugins.Preferences)
+        preferences.register_plugin_preferences(self)
+
+    @on_plugin_available(plugin=Plugins.Projects)
+    def on_projects_available(self):
+        widget = self.get_widget()
+
+        # Connect to projects
+        projects = self.get_plugin(Plugins.Projects)
+
+        projects.sig_project_loaded.connect(self._set_project_dir)
+        projects.sig_project_closed.connect(self._unset_project_dir)
+
+    @on_plugin_available(plugin=Plugins.MainMenu)
+    def on_main_menu_available(self):
+        mainmenu = self.get_plugin(Plugins.MainMenu)
+
+        pylint_act = self.get_action(PylintActions.AnalyzeCurrentFile)
+        mainmenu.add_item_to_application_menu(
+            pylint_act, menu_id=ApplicationMenus.Source)
+
+    @on_plugin_teardown(plugin=Plugins.Editor)
+    def on_editor_teardown(self):
+        widget = self.get_widget()
+        editor = self.get_plugin(Plugins.Editor)
+
+        # Connect to Editor
+        widget.sig_edit_goto_requested.disconnect(editor.load)
+        editor.sig_editor_focus_changed.disconnect(self._set_filename)
+
+        pylint_act = self.get_action(PylintActions.AnalyzeCurrentFile)
+
+        # TODO: use new API when editor has migrated
+        pylint_act.setVisible(False)
+        editor.pythonfile_dependent_actions.remove(pylint_act)
+
+    @on_plugin_teardown(plugin=Plugins.Preferences)
+    def on_preferences_teardown(self):
+        preferences = self.get_plugin(Plugins.Preferences)
+        preferences.deregister_plugin_preferences(self)
+
+    @on_plugin_teardown(plugin=Plugins.Projects)
+    def on_projects_teardown(self):
+        # Disconnect from projects
+        projects = self.get_plugin(Plugins.Projects)
+        projects.sig_project_loaded.disconnect(self._set_project_dir)
+        projects.sig_project_closed.disconnect(self._unset_project_dir)
+
+    @on_plugin_teardown(plugin=Plugins.MainMenu)
+    def on_main_menu_teardown(self):
+        mainmenu = self.get_plugin(Plugins.MainMenu)
+        mainmenu.remove_item_from_application_menu(
+            PylintActions.AnalyzeCurrentFile,
+            menu_id=ApplicationMenus.Source
+        )
 
     # --- Private API
     # ------------------------------------------------------------------------
@@ -111,9 +173,21 @@ class Pylint(SpyderDockablePlugin):
         """
         Set filename without code analysis.
         """
-        editor = self.get_plugin(Plugins.Editor)
-        if editor:
-            self.get_widget().set_filename(editor.get_current_filename())
+        try:
+            editor = self.get_plugin(Plugins.Editor)
+            if editor:
+                self.get_widget().set_filename(editor.get_current_filename())
+        except SpyderAPIError:
+            # Editor was deleted
+            pass
+
+    def _set_project_dir(self, value):
+        widget = self.get_widget()
+        widget.set_conf("project_dir", value)
+
+    def _unset_project_dir(self, _unused):
+        widget = self.get_widget()
+        widget.set_conf("project_dir", None)
 
     # --- Public API
     # ------------------------------------------------------------------------
@@ -146,7 +220,7 @@ class Pylint(SpyderDockablePlugin):
         """
         editor = self.get_plugin(Plugins.Editor)
         if editor:
-            if self.get_conf_option("save_before", True) and not editor.save():
+            if self.get_conf("save_before", True) and not editor.save():
                 return
 
         if filename is None:

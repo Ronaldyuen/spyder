@@ -60,10 +60,15 @@ $ workon spyder-dev
 After you have created your development environment, you need to install Spyder's necessary dependencies. The easiest way to do so (with Anaconda) is
 
 ```bash
-$ conda install -c spyder-ide/label/dev --file requirements/conda.txt
+$ conda install -c conda-forge --file requirements/conda.txt
 ```
 
 This installs all Spyder's dependencies into the environment.
+If you are running on macOS, you will also need to install `python.app`.
+
+```bash
+$ conda install python.app
+```
 
 If using `pip` and `virtualenv` (not recommended), you need to `cd` to the directory where your git clone is stored and run:
 
@@ -78,6 +83,7 @@ To start Spyder directly from your clone, i.e. without installing it into your e
 ```bash
 $ python bootstrap.py
 ```
+Note that if you are running on macOS, you will need to call `pythonw` instead of `python`.
 
 To start Spyder in debug mode, useful for tracking down an issue, you can run:
 
@@ -93,7 +99,7 @@ $ python bootstrap.py --debug
 To install our test dependencies under Anaconda:
 
 ```bash
-$ conda install -c spyder-ide --file requirements/tests.txt
+$ conda install -c conda-forge --file requirements/tests.txt
 ```
 
 If using `pip` (for experts only), run the following from the directory where your git clone is stored:
@@ -115,10 +121,10 @@ When you start to work on a new pull request (PR), you need to be sure that your
 
 To guide you, issues on Github are marked with a milestone that indicates the correct branch to use. If not, follow these guidelines:
 
-* Use the `4.x` branch for bugfixes only (*e.g.* milestones `v4.0.1` or `v4.1.2`)
-* Use `master` to introduce new features or break compatibility with previous Spyder versions (*e.g.* milestones `v5.0beta1` or `v5.0beta2`).
+* Use the `5.x` branch for bugfixes only (*e.g.* milestones `v5.0.1` or `v5.1.2`)
+* Use `master` to introduce new features or break compatibility with previous Spyder versions (*e.g.* milestones `v6.0beta1` or `v6.0beta2`).
 
-You should also submit bugfixes to `4.x` or `master` for errors that are only present in those respective branches.
+You should also submit bugfixes to `5.x` or `master` for errors that are only present in those respective branches.
 
 To start working on a new PR, you need to execute these commands, filling in the branch names where appropriate:
 
@@ -137,10 +143,10 @@ If you started your work in the wrong base branch, or want to backport it, you c
 $ git rebase --onto <NEW-BASE-BRANCH> <OLD-BASE-BRANCH> <YOUR-BRANCH>
 ```
 
-For example, backporting `my_branch` from `master` to `4.x`:
+For example, backporting `my_branch` from `master` to `5.x`:
 
 ```bash
-$ git rebase --onto 4.x master my_branch
+$ git rebase --onto 5.x master my_branch
 ```
 
 
@@ -150,8 +156,8 @@ Spyder and spyder-kernels are developed jointly because a lot of communication h
 
 | Spyder branch       | Associated spyder-kernels branch  |
 | ------------------- | --------------------------------- |
-| 4.x                 | 1.x                               |
-| master (future 5.x) | master (future 2.x)               |
+| 5.x                 | 2.x                               |
+| master (future 6.x) | master (future 3.x)               |
 
 For this reason, a clone of spyder-kernels is placed in the `external-deps` subfolder of the Spyder repository. The instructions on this section will help you in case you need to make changes that touch both repositories at the same time.
 
@@ -187,7 +193,7 @@ As an example, let's assume that (i) your Github user name is `myuser`; (ii) you
 
     $ cd ~/spyder
     $ git checkout fix_in_spyder
-    $ git subrepo pull external-deps/spyder-kernels
+    $ git subrepo clone https://github.com/myuser/spyder-kernels.git external-deps/spyder-kernels -b fix_in_kernel -f
     $ git push origin fix_in_spyder
     ```
 
@@ -197,39 +203,39 @@ As an example, let's assume that (i) your Github user name is `myuser`; (ii) you
     $ git subrepo clone https://github.com/spyder-ide/spyder-kernels.git external-deps/spyder-kernels -b <branch> -f
     ```
 
-where `<branch>` needs to be `1.x` if your `fix_in_spyder` branch was done against Spyder's `4.x` branch; and `master`, if you did it against our `master` branch here.
+where `<branch>` needs to be `2.x` if your `fix_in_spyder` branch was done against Spyder's `5.x` branch; and `master`, if you did it against our `master` branch here.
 
 
-## Making contributions that depend on pull requests in python-language-server
+## Making contributions that depend on pull requests in python-lsp-server
 
-As with spyder-kernels, Spyder is tightly integrated with the [python-language-server](https://github.com/palantir/python-language-server) to provide code completion, linting and folding on its editor.
+As with spyder-kernels, Spyder is tightly integrated with the [python-lsp-server](https://github.com/python-lsp/python-lsp-server) to provide code completion, linting and folding on its editor.
 
-Due to that, a clone of that project is placed in the `external-deps` directory, which is managed with the `git subrepo` project. If you want to make a pull request in python-language-server that affects functionality in Spyder, please read carefully the instructions in the previous section because they are very similar for this case. A summary of those instructions applied to this project is the following:
+Due to that, a clone of that project is placed in the `external-deps` directory, which is managed with the `git subrepo` project. If you want to make a pull request in python-lsp-server that affects functionality in Spyder, please read carefully the instructions in the previous section because they are very similar for this case. A summary of those instructions applied to this project is the following:
 
-* First you need to create a pull request in python-language-server with the changes you want to make there. Let's assume the branch from which that pull request is created is called `fix_in_pyls`.
+* First you need to create a pull request in python-lsp-server with the changes you want to make there. Let's assume the branch from which that pull request is created is called `fix_in_pyls`.
 
-* Then you need to create a branch in Spyder (let's call it `fix_in_spyder`) with the fixes that require that pull request and update the python-language-server subrepo. For that you need to execute the following commands:
+* Then you need to create a branch in Spyder (let's call it `fix_in_spyder`) with the fixes that require that pull request and update the python-lsp-server subrepo. For that you need to execute the following commands:
 
     ```
     $ git checkout -b fix_in_spyder
-    $ git subrepo clone https://github.com/myuser/python-language-server.git external-deps/python-language-server -b fix_in_pyls -f
+    $ git subrepo clone https://github.com/myuser/python-lsp-server.git external-deps/python-lsp-server -b fix_in_pylsp -f
     ```
 
     and then commit the changes you need to make in Spyder.
 
-* If you need to add more commits to `fix_in_pyls`, you need to update `fix_in_spyder` with these commands:
+* If you need to add more commits to `fix_in_pylsp`, you need to update `fix_in_spyder` with these commands:
 
     ```
     $ git checkout fix_in_spyder
-    $ git subrepo pull external-deps/python-language-server
+    $ git subrepo clone https://github.com/myuser/python-lsp-server.git external-deps/python-lsp-server -b fix_in_pylsp -f
     $ git push origin fix_in_spyder
     ```
 
-* After `fix_in_pyls` is merged, you need to update the python-language-server subrepo in your `fix_in_spyder` branch with
+* After `fix_in_pylsp` is merged, you need to update the python-lsp-server subrepo in your `fix_in_spyder` branch with
 
     ```
     $ git checkout fix_in_spyder
-    $ git subrepo clone https://github.com/palantir/python-language-server.git external-deps/python-language-server -b develop -f
+    $ git subrepo clone https://github.com/python-lsp/python-lsp-server.git external-deps/python-lsp-server -b develop -f
     ```
 
 

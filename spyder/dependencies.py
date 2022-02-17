@@ -6,15 +6,17 @@
 
 """Module checking Spyder runtime dependencies"""
 
-
+# Standard library imports
 import os
+import os.path as osp
 import sys
 
 # Local imports
+from spyder.config.base import (
+    _, DEV, is_pynsist, running_in_ci, running_under_pytest)
 from spyder.utils import programs
-from spyder.config.base import _, is_pynsist
-from spyder.config.utils import is_anaconda
 
+HERE = osp.dirname(osp.abspath(__file__))
 
 # =============================================================================
 # Kind of dependency
@@ -37,37 +39,39 @@ DIFF_MATCH_PATCH_REQVER = '>=20181111'
 # None for pynsist install for now
 # (check way to add dist.info/egg.info from packages without wheels available)
 INTERVALTREE_REQVER = None if is_pynsist() else '>=3.0.2'
-IPYTHON_REQVER = ">=7.6.0"
-JEDI_REQVER = '=0.17.2'
+IPYTHON_REQVER = ">=7.6.0;<8.0.0"
+JEDI_REQVER = '>=0.17.2;<0.19.0'
+JELLYFISH_REQVER = '>=0.7'
 JSONSCHEMA_REQVER = '>=3.2.0'
 KEYRING_REQVER = '>=17.0.0'
 NBCONVERT_REQVER = '>=4.0'
 NUMPYDOC_REQVER = '>=0.6.0'
 PARAMIKO_REQVER = '>=2.4.0'
-PARSO_REQVER = '=0.7.0'
+PARSO_REQVER = '>=0.7.0;<0.9.0'
 PEXPECT_REQVER = '>=4.4.0'
 PICKLESHARE_REQVER = '>=0.4'
 PSUTIL_REQVER = '>=5.3'
 PYGMENTS_REQVER = '>=2.0'
-PYLINT_REQVER = '>=1.0'
-PYLS_REQVER = '>=0.36.2;<1.0.0'
-PYLS_BLACK_REQVER = '>=0.4.6'
-PYLS_SPYDER_REQVER = '>=0.3.2'
+PYLINT_REQVER = '>=2.5.0'
+PYLSP_REQVER = '>=1.3.2;<1.4.0'
+PYLSP_BLACK_REQVER = '>=1.0.0'
+PYLS_SPYDER_REQVER = '>=0.4.0'
 PYXDG_REQVER = '>=0.26'
 PYZMQ_REQVER = '>=17'
-QDARKSTYLE_REQVER = '>=2.8'
-QTAWESOME_REQVER = '>=0.5.7'
-QTCONSOLE_REQVER = '>=5.0.1'
+QDARKSTYLE_REQVER = '=3.0.2'
+QSTYLIZER_REQVER = '>=0.1.10'
+QTAWESOME_REQVER = '>=1.0.2'
+QTCONSOLE_REQVER = '>=5.2.1;<5.3.0'
 QTPY_REQVER = '>=1.5.0'
-RTREE_REQVER = '>=0.8.3'
-SETUPTOOLS_REQVER = '>=39.0.0'
+RTREE_REQVER = '>=0.9.7'
+SETUPTOOLS_REQVER = '>=49.6.0'
 SPHINX_REQVER = '>=0.6.6'
-SPYDER_KERNELS_REQVER = '>=2.0.0dev0'
+SPYDER_KERNELS_REQVER = '>=2.2.1;<2.3.0'
 TEXTDISTANCE_REQVER = '>=4.2.0'
 THREE_MERGE_REQVER = '>=0.1.1'
 # None for pynsist install for now
 # (check way to add dist.info/egg.info from packages without wheels available)
-WATCHDOG_REQVER = None if is_pynsist() else '>=0.10.3;<2.0.0'
+WATCHDOG_REQVER = None if is_pynsist() else '>=0.10.3'
 
 
 # Optional dependencies
@@ -124,6 +128,10 @@ DESCRIPTIONS = [
      'package_name': "jedi",
      'features': _("Main backend for the Python Language Server"),
      'required_version': JEDI_REQVER},
+    {'modname': "jellyfish",
+     'package_name': "jellyfish",
+     'features': _("Optimize algorithms for folding"),
+     'required_version': JELLYFISH_REQVER},
     {'modname': 'jsonschema',
      'package_name': 'jsonschema',
      'features': _('Verify if snippets files are valid'),
@@ -171,18 +179,18 @@ DESCRIPTIONS = [
      'package_name': "pylint",
      'features': _("Static code analysis"),
      'required_version': PYLINT_REQVER},
-    {'modname': 'pyls',
-     'package_name': 'python-language-server',
+    {'modname': 'pylsp',
+     'package_name': 'python-lsp-server',
      'features': _("Code completion and linting for the Editor"),
-     'required_version': PYLS_REQVER},
-    {'modname': 'pyls_black',
-     'package_name': 'pyls-black',
+     'required_version': PYLSP_REQVER},
+    {'modname': 'pylsp_black',
+     'package_name': 'python-lsp-black',
      'features': _("Autoformat Python files in the Editor with the Black "
                    "package"),
-     'required_version': PYLS_BLACK_REQVER},
+     'required_version': PYLSP_BLACK_REQVER},
     {'modname': 'pyls_spyder',
      'package_name': 'pyls-spyder',
-     'features': _('Spyder plugin for the Python Language Server'),
+     'features': _('Spyder plugin for the Python LSP Server'),
      'required_version': PYLS_SPYDER_REQVER},
     {'modname': "xdg",
      'package_name': "pyxdg",
@@ -197,6 +205,10 @@ DESCRIPTIONS = [
      'package_name': "qdarkstyle",
      'features': _("Dark style for the entire interface"),
      'required_version': QDARKSTYLE_REQVER},
+    {'modname': "qstylizer",
+     'package_name': "qstylizer",
+     'features': _("Customize Qt stylesheets"),
+     'required_version': QSTYLIZER_REQVER},
     {'modname': "qtawesome",
      'package_name': "qtawesome",
      'features': _("Icon theme based on FontAwesome and Material Design icons"),
@@ -212,8 +224,7 @@ DESCRIPTIONS = [
     {'modname': "rtree",
      'package_name': "rtree",
      'features': _("Fast access to code snippets regions"),
-     'required_version': RTREE_REQVER,
-     'display': is_anaconda() or is_pynsist()},
+     'required_version': RTREE_REQVER},
     {'modname': "setuptools",
      'package_name': "setuptools",
      'features': _("Determine package version"),
@@ -296,9 +307,23 @@ class Dependency(object):
         self.required_version = required_version
         self.kind = kind
 
+        # Although this is not necessarily the case, it's customary that a
+        # package's distribution name be it's name on PyPI with hyphens
+        # replaced by underscores.
+        # Example:
+        # * Package name: python-lsp-black.
+        # * Distribution name: python_lsp_black
+        self.distribution_name = self.package_name.replace('-', '_')
+
         if installed_version is None:
             try:
                 self.installed_version = programs.get_module_version(modname)
+                if not self.installed_version:
+                    # Use get_package_version and the distribution name
+                    # because there are cases for which the version can't
+                    # be obtained from the module (e.g. pylsp_black).
+                    self.installed_version = programs.get_package_version(
+                        self.distribution_name)
             except Exception:
                 # NOTE: Don't add any exception type here!
                 # Modules can fail to import in several ways besides
@@ -309,9 +334,16 @@ class Dependency(object):
 
     def check(self):
         """Check if dependency is installed"""
+        if self.modname == 'spyder_kernels':
+            # TODO: Remove when spyder-kernels 3 is released!
+            return True
         if self.required_version:
-            return programs.is_module_installed(self.modname,
-                                                self.required_version)
+            installed = programs.is_module_installed(
+                self.modname,
+                self.required_version,
+                distribution_name=self.distribution_name
+            )
+            return installed
         else:
             return True
 
@@ -338,9 +370,14 @@ def add(modname, package_name, features, required_version,
     """Add Spyder dependency"""
     global DEPENDENCIES
     for dependency in DEPENDENCIES:
+        # Avoid showing an unnecessary error when running our tests.
+        if running_in_ci() and 'spyder_boilerplate' in modname:
+            continue
+
         if dependency.modname == modname:
-            raise ValueError("Dependency has already been registered: %s"\
-                             % modname)
+            raise ValueError(
+                f"Dependency has already been registered: {modname}")
+
     DEPENDENCIES += [Dependency(modname, package_name, features,
                                 required_version,
                                 installed_version, kind)]
@@ -375,15 +412,17 @@ def status(deps=DEPENDENCIES, linesep=os.linesep):
     maxwidth += 1
     text = ""
     prev_order = '-1'
-    for order, title, version in sorted(data,
-                                        key=lambda x: x[0] + x[1].lower()):
+    for order, title, version in sorted(
+            data, key=lambda x: x[0] + x[1].lower()):
         if order != prev_order:
-            text += '{sep}# {name}:{sep}'.format(
-                sep=linesep, name=order_dep[order].capitalize())
+            name = order_dep[order]
+            if name == MANDATORY:
+                text += f'# {name.capitalize()}:{linesep}'
+            else:
+                text += f'{linesep}# {name.capitalize()}:{linesep}'
             prev_order = order
 
-        text += '{title}:  {version}{linesep}'.format(
-            title=title.ljust(maxwidth), version=version, linesep=linesep)
+        text += f'{title.ljust(maxwidth)}:  {version}{linesep}'
 
     # Remove spurious linesep when reporting deps to Github
     if not linesep == '<br>':
@@ -396,6 +435,14 @@ def missing_dependencies():
     """Return the status of missing dependencies (if any)"""
     missing_deps = []
     for dependency in DEPENDENCIES:
+        # Skip checking dependencies for which we have subrepos
+        if (DEV or running_under_pytest()) and not running_in_ci():
+            repo_path = osp.normpath(osp.join(HERE, '..'))
+            subrepos_path = osp.join(repo_path, 'external-deps')
+            subrepos = os.listdir(subrepos_path)
+            if dependency.package_name in subrepos:
+                continue
+
         if dependency.kind != OPTIONAL and not dependency.check():
             missing_deps.append(dependency)
 

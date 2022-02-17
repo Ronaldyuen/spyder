@@ -70,15 +70,11 @@ class BlockUserData(QTextBlockUserData):
         # Add a reference to the user data in the editor as the block won't.
         # The list should /not/ be used to list BlockUserData as the blocks
         # they refer to might not exist anymore.
-        # This prevent a segmentation fault.
+        # This prevents a segmentation fault.
         if editor is None:
             # Won't be destroyed
             self.refloop = self
             return
-        # Destroy with the editor
-        if not hasattr(editor, '_user_data_reference_list'):
-            editor._user_data_reference_list = []
-        editor._user_data_reference_list.append(self)
 
     def _selection(self):
         """
@@ -158,7 +154,13 @@ class DelayJobRunner(object):
     def _exec_requested_job(self):
         """Execute the requested job after the timer has timeout."""
         self._timer.stop()
-        self._job(*self._args, **self._kwargs)
+
+        try:
+            self._job(*self._args, **self._kwargs)
+        except KeyError:
+            # Catching the KeyError above is necessary to avoid
+            # issue spyder-ide/spyder#15712.
+            pass
 
 
 class TextHelper(object):

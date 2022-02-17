@@ -45,7 +45,8 @@ class OnlineHelp(SpyderDockablePlugin):
 
     # --- SpyderDockablePlugin API
     # ------------------------------------------------------------------------
-    def get_name(self):
+    @staticmethod
+    def get_name():
         return _('Online help')
 
     def get_description(self):
@@ -57,11 +58,11 @@ class OnlineHelp(SpyderDockablePlugin):
 
     def on_close(self, cancelable=False):
         self.save_history()
-        self.set_conf_option('zoom_factor',
-                             self.get_widget().get_zoom_factor())
+        self.set_conf('zoom_factor',
+                      self.get_widget().get_zoom_factor())
         return True
 
-    def register(self):
+    def on_initialize(self):
         widget = self.get_widget()
         widget.load_history(self.load_history())
         widget.sig_load_finished.connect(self.sig_load_finished)

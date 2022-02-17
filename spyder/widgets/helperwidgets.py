@@ -23,8 +23,7 @@ from qtpy.QtWidgets import (QApplication, QCheckBox, QLineEdit, QMessageBox,
 
 # Local imports
 from spyder.config.base import _
-from spyder.utils import icon_manager as ima
-from spyder.utils.qthelpers import get_std_icon
+from spyder.utils.icon_manager import ima
 from spyder.utils.stringmatching import get_search_regex
 
 # Valid finder chars. To be improved
@@ -37,7 +36,7 @@ class HelperToolButton(QToolButton):
     """
     def __init__(self):
         QToolButton.__init__(self)
-        self.setIcon(get_std_icon('MessageBoxInformation'))
+        self.setIcon(ima.get_std_icon('MessageBoxInformation'))
         style = """
             QToolButton {
               padding:0px;
@@ -68,7 +67,8 @@ class MessageCheckBox(QMessageBox):
     def __init__(self, *args, **kwargs):
         super(MessageCheckBox, self).__init__(*args, **kwargs)
 
-        self._checkbox = QCheckBox()
+        self.setWindowModality(Qt.NonModal)
+        self._checkbox = QCheckBox(self)
 
         # Set layout to include checkbox
         size = 9
@@ -159,7 +159,14 @@ class HTMLDelegate(QStyledItemDelegate):
                     painter.translate(textRect.topLeft() + QPoint(2, 4))
         else:
             painter.translate(textRect.topLeft() + QPoint(0, -3))
-        doc.documentLayout().draw(painter, ctx)
+
+        # Type check: Prevent error in PySide where using
+        # doc.documentLayout().draw() may fail because doc.documentLayout()
+        # returns an object of type QtGui.QStandardItem (for whatever reason).
+        docLayout = doc.documentLayout()
+        if type(docLayout) is QAbstractTextDocumentLayout:
+            docLayout.draw(painter, ctx)
+
         painter.restore()
 
     def sizeHint(self, option, index):

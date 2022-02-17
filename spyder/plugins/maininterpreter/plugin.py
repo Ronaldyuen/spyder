@@ -17,6 +17,8 @@ from qtpy.QtCore import Slot
 
 # Local imports
 from spyder.api.plugins import Plugins, SpyderPluginV2
+from spyder.api.plugin_registration.decorators import (
+    on_plugin_available, on_plugin_teardown)
 from spyder.api.translations import get_translation
 from spyder.plugins.maininterpreter.confpage import MainInterpreterConfigPage
 from spyder.plugins.maininterpreter.container import MainInterpreterContainer
@@ -38,9 +40,11 @@ class MainInterpreter(SpyderPluginV2):
     CONF_WIDGET_CLASS = MainInterpreterConfigPage
     CONF_SECTION = NAME
     CONF_FILE = False
+    CAN_BE_DISABLED = False
 
     # ---- SpyderPluginV2 API
-    def get_name(self):
+    @staticmethod
+    def get_name():
         return _("Python interpreter")
 
     def get_description(self):
@@ -49,13 +53,8 @@ class MainInterpreter(SpyderPluginV2):
     def get_icon(self):
         return self.create_icon('python')
 
-    def register(self):
+    def on_initialize(self):
         container = self.get_container()
-        preferences = self.get_plugin(Plugins.Preferences)
-        statusbar = self.get_plugin(Plugins.StatusBar)
-
-        # Register conf page
-        preferences.register_plugin_preferences(self)
 
         # Connect signal to open preferences
         container.sig_open_preferences_requested.connect(
@@ -72,18 +71,38 @@ class MainInterpreter(SpyderPluginV2):
             self._add_to_custom_interpreters
         )
 
-        # Add status widget
-        if statusbar:
-            statusbar.add_status_widget(self.interpreter_status)
-
         # Validate that the custom interpreter from the previous session
         # still exists
-        if self.get_conf_option('custom'):
-            interpreter = self.get_conf_option('custom_interpreter')
+        if self.get_conf('custom'):
+            interpreter = self.get_conf('custom_interpreter')
             if not osp.isfile(interpreter):
-                self.set_conf_option('custom', False)
-                self.set_conf_option('default', True)
-                self.set_conf_option('executable', get_python_executable())
+                self.set_conf('custom', False)
+                self.set_conf('default', True)
+                self.set_conf('executable', get_python_executable())
+
+    @on_plugin_available(plugin=Plugins.Preferences)
+    def on_preferences_available(self):
+        # Register conf page
+        preferences = self.get_plugin(Plugins.Preferences)
+        preferences.register_plugin_preferences(self)
+
+    @on_plugin_available(plugin=Plugins.StatusBar)
+    def on_statusbar_available(self):
+        # Add status widget
+        statusbar = self.get_plugin(Plugins.StatusBar)
+        statusbar.add_status_widget(self.interpreter_status)
+
+    @on_plugin_teardown(plugin=Plugins.Preferences)
+    def on_preferences_teardown(self):
+        # Deregister conf page
+        preferences = self.get_plugin(Plugins.Preferences)
+        preferences.deregister_plugin_preferences(self)
+
+    @on_plugin_teardown(plugin=Plugins.StatusBar)
+    def on_statusbar_teardown(self):
+        # Add status widget
+        statusbar = self.get_plugin(Plugins.StatusBar)
+        statusbar.remove_status_widget(self.interpreter_status.ID)
 
     # ---- Public API
     def get_interpreter(self):
@@ -108,8 +127,8 @@ class MainInterpreter(SpyderPluginV2):
     @Slot(str)
     def _add_to_custom_interpreters(self, interpreter):
         """Add a new interpreter to the list of saved ones."""
-        custom_list = self.get_conf_option('custom_interpreters_list')
+        custom_list = self.get_conf('custom_interpreters_list')
         if interpreter not in custom_list:
             custom_list.append(interpreter)
-            self.set_conf_option('custom_interpreters_list', custom_list)
-        self.set_conf_option('executable', interpreter)
+            self.set_conf('custom_interpreters_list', custom_list)
+        self.set_conf('executable', interpreter)

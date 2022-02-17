@@ -5,15 +5,15 @@
 # (see spyder/__init__.py for details)
 
 # Third party imports
-from qtpy.QtCore import Slot
-from qtpy.QtWidgets import QTreeWidget, QMenu
+from qtpy import PYQT5
+from qtpy.QtCore import Qt, Slot
+from qtpy.QtWidgets import QAbstractItemView, QHeaderView, QTreeWidget
 
 # Local imports
 from spyder.api.widgets.mixins import SpyderWidgetMixin
 from spyder.config.base import _
-from spyder.utils import icon_manager as ima
-from spyder.utils.qthelpers import (add_actions, create_action,
-                                    get_item_user_text)
+from spyder.utils.icon_manager import ima
+from spyder.utils.qthelpers import get_item_user_text
 
 
 class OneColumnTreeActions:
@@ -35,15 +35,15 @@ class OneColumnTree(QTreeWidget, SpyderWidgetMixin):
     """
     One-column tree widget with context menu.
     """
-    DEFAULT_OPTIONS = {}
 
     def __init__(self, parent):
-        super().__init__(parent)
+        if PYQT5:
+            super().__init__(parent, class_parent=parent)
+        else:
+            QTreeWidget.__init__(self, parent)
+            SpyderWidgetMixin.__init__(self, class_parent=parent)
 
         self.__expanded_state = None
-
-        # Widgets
-        self.menu = self.create_menu("context_menu")
 
         # Widget setup
         self.setItemsExpandable(True)
@@ -62,11 +62,21 @@ class OneColumnTree(QTreeWidget, SpyderWidgetMixin):
         self.itemClicked.connect(self.clicked)
         self.itemSelectionChanged.connect(self.item_selection_changed)
 
+        # To use mouseMoveEvent
+        self.setMouseTracking(True)
+
+        # Use horizontal scrollbar when needed
+        self.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.header().setStretchLastSection(False)
+
         self.item_selection_changed()
 
-    # --- SpyderWidgetMixin API
-    # ------------------------------------------------------------------------
-    def setup(self, options=DEFAULT_OPTIONS):
+    # ---- SpyderWidgetMixin API
+    # -------------------------------------------------------------------------
+    def setup(self):
+        self.menu = self.create_menu("context_menu")
+
         self.collapse_all_action = self.create_action(
             OneColumnTreeActions.CollapseAllAction,
             text=_("Collapse all"),
@@ -124,14 +134,11 @@ class OneColumnTree(QTreeWidget, SpyderWidgetMixin):
                 section=OneColumnTreeContextMenuSections.Section,
             )
 
-    def on_option_update(self, option, value):
-        pass
-
     def update_actions(self):
         pass
 
-    # --- Public API
-    # ------------------------------------------------------------------------
+    # ---- Public API
+    # -------------------------------------------------------------------------
     def activated(self, item):
         """Double-click event"""
         raise NotImplementedError
@@ -280,6 +287,21 @@ class OneColumnTree(QTreeWidget, SpyderWidgetMixin):
             self.insertTopLevelItem(index, item)
         self.restore_expanded_state()
 
+    # ---- Qt methods
+    # -------------------------------------------------------------------------
     def contextMenuEvent(self, event):
         """Override Qt method"""
         self.menu.popup(event.globalPos())
+
+    def mouseMoveEvent(self, event):
+        """Change cursor shape."""
+        index = self.indexAt(event.pos())
+        if index.isValid():
+            vrect = self.visualRect(index)
+            item_identation = vrect.x() - self.visualRect(self.rootIndex()).x()
+            if event.pos().x() > item_identation:
+                # When hovering over results
+                self.setCursor(Qt.PointingHandCursor)
+            else:
+                # On every other element
+                self.setCursor(Qt.ArrowCursor)

@@ -9,22 +9,24 @@ Widget that handles communications between a console in debugging
 mode and Spyder
 """
 
+# Standard library imports
 import pdb
 import re
 
+# Third-party imports
 from IPython.core.history import HistoryManager
-from IPython import __version__ as ipy_version
 from IPython.core.inputtransformer2 import TransformerManager
 from IPython.lib.lexers import IPythonLexer, IPython3Lexer
 from pygments.lexer import bygroups
 from pygments.token import Keyword, Operator, Text
 from pygments.util import ClassNotFound
 from qtconsole.rich_jupyter_widget import RichJupyterWidget
-from qtpy.QtCore import Qt
+from qtpy.QtCore import QEvent
 from qtpy.QtGui import QTextCursor
 
-from spyder.config.base import _, get_conf_path
-from spyder.config.manager import CONF
+# Local imports
+from spyder.api.config.mixins import SpyderConfigurationAccessor
+from spyder.config.base import get_conf_path
 
 
 class SpyderIPy3Lexer(IPython3Lexer):
@@ -73,14 +75,6 @@ class DebuggingHistoryWidget(RichJupyterWidget):
         super(DebuggingHistoryWidget, self).__init__(*args, **kwargs)
 
     # --- Public API --------------------------------------------------
-    def shutdown(self):
-        """Shutdown the widget"""
-        try:
-            self._pdb_history_file.save_thread.stop()
-            self._pdb_history_file.db.close()
-        except AttributeError:
-            pass
-
     def new_history_session(self):
         """Start a new history session."""
         self._pdb_history_input_number = 0
@@ -170,12 +164,14 @@ class DebuggingHistoryWidget(RichJupyterWidget):
             self.__history_index = history_index
 
 
-class DebuggingWidget(DebuggingHistoryWidget):
+class DebuggingWidget(DebuggingHistoryWidget, SpyderConfigurationAccessor):
     """
     Widget with the necessary attributes and methods to handle
     communications between a console in debugging mode and
     Spyder
     """
+
+    CONF_SECTION = 'ipython_console'
 
     def __init__(self, *args, **kwargs):
         # Communication state
@@ -191,11 +187,23 @@ class DebuggingWidget(DebuggingHistoryWidget):
         # Temporary flags
         self._tmp_reading = False
         # super init
+        # Needed to handle other configuration objects than the default CONF.
+        # Useful for changing preferences when testing while using the
+        # `ipyconsole` fixture.
+        configuration = kwargs.pop('configuration', self.CONFIGURATION)
+        self.CONFIGURATION = configuration
         super(DebuggingWidget, self).__init__(*args, **kwargs)
+
+        # Adapted from qtconsole/frontend_widget.py
+        # This adds the IPdb as a prompt self._highlighter recognises
+        self._highlighter._ipy_prompt_re = re.compile(
+            r'^({})?('.format(re.escape(self.other_output_prefix)) +
+            r'[ \t]*\(*IPdb \[\d+\]\)*: |' +
+            r'[ \t]*In \[\d+\]: |[ \t]*\ \ \ \.\.\.+: )')
 
     # --- Public API --------------------------------------------------
 
-    def will_close(self, externally_managed):
+    def shutdown(self):
         """
         Close the save thread and database file.
         """
@@ -334,7 +342,7 @@ class DebuggingWidget(DebuggingHistoryWidget):
 
             # Emit executing
             self.executing.emit(line)
-            self.sig_pdb_state.emit(
+            self.sig_pdb_state_changed.emit(
                 False, self.get_pdb_last_step())
 
         if self._pdb_input_ready:
@@ -349,13 +357,12 @@ class DebuggingWidget(DebuggingHistoryWidget):
     def get_pdb_settings(self):
         """Get pdb settings"""
         return {
-            "breakpoints": CONF.get('run', 'breakpoints', {}),
-            "pdb_ignore_lib": CONF.get('ipython_console', 'pdb_ignore_lib'),
-            "pdb_execute_events": CONF.get(
-                'ipython_console', 'pdb_execute_events'),
+            "breakpoints": self.get_conf(
+                'breakpoints', default={}, section='run'),
+            "pdb_ignore_lib": self.get_conf('pdb_ignore_lib'),
+            "pdb_execute_events": self.get_conf('pdb_execute_events'),
             "pdb_use_exclamation_mark": self.is_pdb_using_exclamantion_mark(),
-            "pdb_stop_first_line": CONF.get(
-                'ipython_console', 'pdb_stop_first_line'),
+            "pdb_stop_first_line": self.get_conf('pdb_stop_first_line'),
         }
 
     # --- To Sort --------------------------------------------------
@@ -369,7 +376,7 @@ class DebuggingWidget(DebuggingHistoryWidget):
     def set_spyder_breakpoints(self):
         """Set Spyder breakpoints into a debugging session"""
         self.call_kernel(interrupt=True).set_breakpoints(
-            CONF.get('run', 'breakpoints', {}))
+            self.get_conf('breakpoints', default={}, section='run'))
 
     def set_pdb_ignore_lib(self, pdb_ignore_lib):
         """Set pdb_ignore_lib into a debugging session"""
@@ -387,7 +394,7 @@ class DebuggingWidget(DebuggingHistoryWidget):
             pdb_use_exclamation_mark)
 
     def is_pdb_using_exclamantion_mark(self):
-        return CONF.get('ipython_console', 'pdb_use_exclamation_mark')
+        return self.get_conf('pdb_use_exclamation_mark')
 
     def do_where(self):
         """Where was called, go to the current location."""
@@ -424,6 +431,21 @@ class DebuggingWidget(DebuggingHistoryWidget):
         if pdb_state is not None and isinstance(pdb_state, dict):
             self.refresh_from_pdb(pdb_state)
 
+    def show_pdb_output(self, text):
+        """Show Pdb output."""
+        self._append_plain_text(self.output_sep, before_prompt=True)
+        prompt = self._current_out_prompt()
+        self._append_html(
+            '<span class="out-prompt">%s</span>' % prompt,
+            before_prompt=True
+        )
+        # If the repr is multiline, make sure we start on a new line,
+        # so that its lines are aligned.
+        if "\n" in text and not self.output_sep.endswith("\n"):
+            self._append_plain_text('\n', before_prompt=True)
+        self._append_plain_text(text + self.output_sep2, before_prompt=True)
+        self._append_plain_text('\n', before_prompt=True)
+
     def get_pdb_last_step(self):
         """Get last pdb step retrieved from a Pdb session."""
         fname, lineno = self._pdb_frame_loc
@@ -459,6 +481,14 @@ class DebuggingWidget(DebuggingHistoryWidget):
     # --- Private API --------------------------------------------------
     def _current_prompt(self):
         prompt = "IPdb [{}]".format(self._pdb_history_input_number + 1)
+        for i in range(self._pdb_in_loop - 1):
+            # Add recursive debugger prompt
+            prompt = "({})".format(prompt)
+        return prompt + ": "
+
+    def _current_out_prompt(self):
+        """Get current out prompt."""
+        prompt = "Out\u00A0\u00A0[{}]".format(self._pdb_history_input_number)
         for i in range(self._pdb_in_loop - 1):
             # Add recursive debugger prompt
             prompt = "({})".format(prompt)
@@ -504,11 +534,7 @@ class DebuggingWidget(DebuggingHistoryWidget):
         if prompt == self._pdb_prompt[0]:
             # Nothing to do
             return
-        # Adapted from qtconsole/frontend_widget.py
-        # This adds `prompt` as a prompt self._highlighter recognises
-        self._highlighter._ipy_prompt_re = re.compile(
-            r'^({})?([ \t]*{}|[ \t]*In \[\d+\]: |[ \t]*\ \ \ \.\.\.+: )'
-            .format(re.escape(self.other_output_prefix), re.escape(prompt)))
+
         if password is None:
             password = self._pdb_prompt[1]
         self._pdb_prompt = (prompt, password)
@@ -572,9 +598,6 @@ class DebuggingWidget(DebuggingHistoryWidget):
 
     def pdb_input(self, prompt, password=None):
         """Get input for a command."""
-        if self._hidden:
-            raise RuntimeError(
-                'Request for pdb input during hidden execution.')
 
         # Replace with numbered prompt
         prompt = self._current_prompt()
@@ -599,11 +622,11 @@ class DebuggingWidget(DebuggingHistoryWidget):
             # The previous code finished executing
             self.executed.emit(self._pdb_prompt)
             self.sig_pdb_prompt_ready.emit()
-            self.sig_pdb_state.emit(True, self.get_pdb_last_step())
+            self.sig_pdb_state_changed.emit(True, self.get_pdb_last_step())
 
         self._pdb_input_ready = True
 
-        start_line = CONF.get('ipython_console', 'startup/pdb_run_lines', '')
+        start_line = self.get_conf('startup/pdb_run_lines', default='')
         # Only run these lines when printing a new prompt
         if start_line and print_prompt and self.is_waiting_pdb_input():
             # Send a few commands
@@ -656,3 +679,16 @@ class DebuggingWidget(DebuggingHistoryWidget):
         else:
             return super(DebuggingWidget, self)._register_is_complete_callback(
                 source, callback)
+
+    # ---- Qt methods ---------------------------------------------------------
+    def eventFilter(self, obj, event):
+        # When using PySide, it can happen that "event" is of type QWidgetItem
+        # (reason unknown). This causes an exception in eventFilter() in
+        # console_widget.py in the QtConsole package: Therein event.type() is
+        # accessed which fails due to an AttributeError. Catch this here and
+        # ignore the event.
+        if not isinstance(event, QEvent):
+            # Note for debugging: event.layout() or event.widget() SEGFAULTs
+            return True
+
+        return super().eventFilter(obj, event)

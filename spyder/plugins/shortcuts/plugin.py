@@ -21,6 +21,8 @@ from qtpy.QtWidgets import QAction, QShortcut
 
 # Local imports
 from spyder.api.plugins import Plugins, SpyderPluginV2
+from spyder.api.plugin_registration.decorators import (
+    on_plugin_available, on_plugin_teardown)
 from spyder.api.translations import get_translation
 from spyder.plugins.mainmenu.api import ApplicationMenus, HelpMenuSections
 from spyder.plugins.shortcuts.confpage import ShortcutsConfigPage
@@ -49,6 +51,7 @@ class Shortcuts(SpyderPluginV2):
     CONF_WIDGET_CLASS = ShortcutsConfigPage
     CONF_SECTION = NAME
     CONF_FILE = False
+    CAN_BE_DISABLED = False
 
     # --- Signals
     # ------------------------------------------------------------------------
@@ -59,7 +62,8 @@ class Shortcuts(SpyderPluginV2):
 
     # --- SpyderPluginV2 API
     # ------------------------------------------------------------------------
-    def get_name(self):
+    @staticmethod
+    def get_name():
         return _("Keyboard shortcuts")
 
     def get_description(self):
@@ -68,13 +72,9 @@ class Shortcuts(SpyderPluginV2):
     def get_icon(self):
         return self.create_icon('keyboard')
 
-    def register(self):
-        mainmenu = self.get_plugin(Plugins.MainMenu)
-        preferences = self.get_plugin(Plugins.Preferences)
-        preferences.register_plugin_preferences(self)
-
+    def on_initialize(self):
         self._shortcut_data = []
-        shortcuts_action = self.create_action(
+        self.create_action(
             ShortcutActions.ShortcutSummaryAction,
             text=_("Shortcuts Summary"),
             triggered=lambda: self.show_summary(),
@@ -82,14 +82,36 @@ class Shortcuts(SpyderPluginV2):
             context=Qt.ApplicationShortcut,
         )
 
+    @on_plugin_available(plugin=Plugins.Preferences)
+    def on_preferences_available(self):
+        preferences = self.get_plugin(Plugins.Preferences)
+        preferences.register_plugin_preferences(self)
+
+    @on_plugin_available(plugin=Plugins.MainMenu)
+    def on_main_menu_available(self):
+        mainmenu = self.get_plugin(Plugins.MainMenu)
+        shortcuts_action = self.get_action(
+            ShortcutActions.ShortcutSummaryAction)
+
         # Add to Help menu.
-        if mainmenu:
-            help_menu = mainmenu.get_application_menu(ApplicationMenus.Help)
-            mainmenu.add_item_to_application_menu(
-                shortcuts_action,
-                help_menu,
-                section=HelpMenuSections.Documentation,
-            )
+        mainmenu.add_item_to_application_menu(
+            shortcuts_action,
+            menu_id=ApplicationMenus.Help,
+            section=HelpMenuSections.Documentation,
+        )
+
+    @on_plugin_teardown(plugin=Plugins.Preferences)
+    def on_preferences_teardown(self):
+        preferences = self.get_plugin(Plugins.Preferences)
+        preferences.deregister_plugin_preferences(self)
+
+    @on_plugin_teardown(plugin=Plugins.MainMenu)
+    def on_main_menu_teardown(self):
+        mainmenu = self.get_plugin(Plugins.MainMenu)
+        mainmenu.remove_item_from_application_menu(
+            ShortcutActions.ShortcutSummaryAction,
+            menu_id=ApplicationMenus.Help
+        )
 
     def on_mainwindow_visible(self):
         self.apply_shortcuts()
@@ -177,10 +199,8 @@ class Shortcuts(SpyderPluginV2):
 
                     if add_shortcut_to_tip:
                         add_shortcut_to_tooltip(qobject, context, name)
-
                 elif isinstance(qobject, QShortcut):
                     qobject.setKey(keyseq)
-
             except RuntimeError:
                 # Object has been deleted
                 toberemoved.append(index)

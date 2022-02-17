@@ -12,10 +12,7 @@ This file only deals with non-GUI configuration features
 sip API incompatibility issue in spyder's non-gui modules)
 """
 
-from __future__ import print_function
-
 import codecs
-import getpass
 import locale
 import os
 import os.path as osp
@@ -28,9 +25,8 @@ import warnings
 
 # Local imports
 from spyder import __version__
-from spyder.utils import encoding
 from spyder.py3compat import is_unicode, PY3, to_text_string, is_text_string
-
+from spyder.utils import encoding
 
 #==============================================================================
 # Only for development
@@ -56,12 +52,17 @@ def get_safe_mode():
 
 def running_under_pytest():
     """
-    Return True if currently running under py.test.
+    Return True if currently running under pytest.
 
     This function is used to do some adjustment for testing. The environment
     variable SPYDER_PYTEST is defined in conftest.py.
     """
     return bool(os.environ.get('SPYDER_PYTEST'))
+
+
+def running_in_ci():
+    """Return True if currently running under CI."""
+    return bool(os.environ.get('CI'))
 
 
 def is_stable_version(version):
@@ -200,12 +201,31 @@ def get_clean_conf_dir():
     return conf_dir
 
 
+def get_custom_conf_dir():
+    """
+    Use a custom configuration directory, passed through our command
+    line options or by setting the env var below.
+    """
+    custom_dir = os.environ.get('SPYDER_CONFDIR')
+    if custom_dir:
+        custom_dir = osp.abspath(custom_dir)
+
+        # Set env var to not lose its value in future calls when the cwd
+        # is changed by Spyder.
+        os.environ['SPYDER_CONFDIR'] = custom_dir
+        return custom_dir
+
+
 def get_conf_path(filename=None):
     """Return absolute path to the config file with the specified filename."""
     # Define conf_dir
     if running_under_pytest() or get_safe_mode():
         # Use clean config dir if running tests or the user requests it.
         conf_dir = get_clean_conf_dir()
+    elif get_custom_conf_dir():
+        # Use a custom directory if the user decided to do it through
+        # our command line options.
+        conf_dir = get_custom_conf_dir()
     elif sys.platform.startswith('linux'):
         # This makes us follow the XDG standard to save our settings
         # on Linux, as it was requested on spyder-ide/spyder#2629.
@@ -222,7 +242,7 @@ def get_conf_path(filename=None):
 
     # Create conf_dir
     if not osp.isdir(conf_dir):
-        if running_under_pytest() or get_safe_mode():
+        if running_under_pytest() or get_safe_mode() or get_custom_conf_dir():
             os.makedirs(conf_dir)
         else:
             os.mkdir(conf_dir)
@@ -252,6 +272,10 @@ def get_conf_paths():
         SEARCH_PATH += (
             '{}/etc/spyder'.format(CONDA_PREFIX),
         )
+
+    SEARCH_PATH += (
+        '{}/etc/spyder'.format(sys.prefix),
+    )
 
     if running_under_pytest():
         search_paths = []
@@ -327,33 +351,6 @@ def is_pynsist():
         return pkgs_path in os.environ.get('PYTHONPATH')
     return False
 
-
-#==============================================================================
-# Image path list
-#==============================================================================
-IMG_PATH = []
-def add_image_path(path):
-    if not osp.isdir(path):
-        return
-    global IMG_PATH
-    IMG_PATH.append(path)
-    for dirpath, dirnames, _filenames in os.walk(path):
-        for dirname in dirnames:
-            IMG_PATH.append(osp.join(dirpath, dirname))
-
-add_image_path(get_module_data_path('spyder', relpath='images'))
-
-def get_image_path(name, default="not_found.png"):
-    """Return image absolute path"""
-    for img_path in IMG_PATH:
-        full_path = osp.join(img_path, name)
-        if osp.isfile(full_path):
-            return osp.abspath(full_path)
-    if default is not None:
-        img_path = osp.join(get_module_path('spyder'), 'images')
-        return osp.abspath(osp.join(img_path, default))
-
-
 #==============================================================================
 # Translations
 #==============================================================================
@@ -376,7 +373,7 @@ LANGUAGE_CODES = {
 }
 
 # Disabled languages because their translations are outdated or incomplete
-DISABLED_LANGUAGES = ['hu', 'ru', 'pl']
+DISABLED_LANGUAGES = ['hu', 'pl']
 
 def get_available_translations():
     """
@@ -398,9 +395,10 @@ def get_available_translations():
     # is added, to ensure LANGUAGE_CODES is updated.
     for lang in langs:
         if lang not in LANGUAGE_CODES:
-            error = ('Update LANGUAGE_CODES (inside config/base.py) if a new '
-                     'translation has been added to Spyder')
-            print(error)  # spyder: test-skip
+            if DEV:
+                error = ('Update LANGUAGE_CODES (inside config/base.py) if a '
+                         'new translation has been added to Spyder')
+                print(error)  # spyder: test-skip
             return ['en']
     return langs
 

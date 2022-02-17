@@ -6,14 +6,13 @@ coverage
 cython
 flaky
 matplotlib
-mock
 pandas
 pillow
-pytest <6.0
+pytest <7.0
 pytest-cov
 pytest-lazy-fixture
 pytest-mock
-pytest-ordering
+pytest-order
 pytest-qt
 pyyaml
 scipy

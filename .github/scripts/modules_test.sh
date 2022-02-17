@@ -47,7 +47,10 @@ for f in spyder/*/*.py; do
         continue
     fi
     if [[ $f == spyder/widgets/about.py ]]; then
-    continue
+        continue
+    fi
+    if [[ $f == spyder/api/__init__.py ]]; then
+        continue
     fi
     python "$f"
     if [ $? -ne 0 ]; then
@@ -77,6 +80,15 @@ for f in spyder/*/*/*.py; do
         continue
     fi
     if [[ $f == spyder/utils/introspection/old_fallback.py ]]; then
+        continue
+    fi
+    if [[ $f == spyder/plugins/tours/widgets.py ]]; then
+        continue
+    fi
+    if [[ $f == spyder/api/plugins/*.py ]]; then
+        continue
+    fi
+    if [[ $f == spyder/plugins/pylint/main_widget.py ]]; then
         continue
     fi
     python "$f"

@@ -17,10 +17,9 @@ from qtpy.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 # Local imports
 from spyder.api.translations import get_translation
-from spyder.api.widgets import PluginMainWidget
+from spyder.api.widgets.main_widget import PluginMainWidget
 from spyder.plugins.explorer.widgets.explorer import (
-    DirViewActions, ExplorerTreeWidget, ExplorerTreeWidgetActions,
-    FilteredDirView)
+    DirViewActions, ExplorerTreeWidget, ExplorerTreeWidgetActions)
 from spyder.utils.misc import getcwd_or_home
 
 
@@ -41,16 +40,6 @@ class ExplorerWidgetMainToolbarSections:
 # ---- Main widget
 class ExplorerWidget(PluginMainWidget):
     """Explorer widget"""
-
-    DEFAULT_OPTIONS = {
-        'date_column': True,
-        'type_column': False,
-        'size_column': False,
-        'file_associations': {},
-        'name_filters': ['*.py'],
-        'single_click_to_open': False,
-        'show_hidden': False,
-    }
 
     # --- Signals
     # ------------------------------------------------------------------------
@@ -126,14 +115,16 @@ class ExplorerWidget(PluginMainWidget):
         Folder to remove.
     """
 
-    sig_tree_renamed = Signal(str)
+    sig_tree_renamed = Signal(str, str)
     """
     This signal is emitted when a folder is renamed.
 
     Parameters
     ----------
-    path: str
-        Folder to remove.
+    old_path: str
+        Old path for renamed folder.
+    new_path: str
+        New path for renamed folder.
     """
 
     sig_run_requested = Signal(str)
@@ -157,7 +148,7 @@ class ExplorerWidget(PluginMainWidget):
         Path to use as working directory of interpreter.
     """
 
-    def __init__(self, name, plugin, parent=None, options=DEFAULT_OPTIONS):
+    def __init__(self, name, plugin, parent=None):
         """
         Initialize the widget.
 
@@ -169,18 +160,14 @@ class ExplorerWidget(PluginMainWidget):
             Plugin of the container
         parent: QWidget
             Parent of this widget
-        options: dict
-            Options of the container.
         """
-        super().__init__(name, plugin=plugin, parent=parent, options=options)
+        super().__init__(name, plugin=plugin, parent=parent)
 
         # Widgets
-        tree_options = self.options_from_keys(
-            options, ExplorerTreeWidget.DEFAULT_OPTIONS)
-        self.treewidget = ExplorerTreeWidget(parent=self, options=tree_options)
+        self.treewidget = ExplorerTreeWidget(parent=self)
 
         # Setup widgets
-        self.treewidget.setup(tree_options)
+        self.treewidget.setup()
         self.chdir(getcwd_or_home())
 
         # Layouts
@@ -193,7 +180,6 @@ class ExplorerWidget(PluginMainWidget):
         self.treewidget.sig_file_created.connect(self.sig_file_created)
         self.treewidget.sig_open_file_requested.connect(
             self.sig_open_file_requested)
-        self.treewidget.sig_option_changed.connect(self.sig_option_changed)
         self.treewidget.sig_module_created.connect(self.sig_module_created)
         self.treewidget.sig_open_interpreter_requested.connect(
             self.sig_open_interpreter_requested)
@@ -215,15 +201,8 @@ class ExplorerWidget(PluginMainWidget):
         """Return the title of the plugin tab."""
         return _("Files")
 
-    def setup(self, options):
-        """
-        Performs the setup of plugin's menu and actions.
-
-        Parameters
-        ----------
-        options: dict
-            Widget options.
-        """
+    def setup(self):
+        """Performs the setup of plugin's menu and actions."""
         # Menu
         menu = self.get_options_menu()
 
@@ -258,19 +237,6 @@ class ExplorerWidget(PluginMainWidget):
     def update_actions(self):
         """Handle the update of actions of the plugin."""
         pass
-
-    def on_option_update(self, option, value):
-        """
-        Handles the update or change of an option.
-
-        Parameters
-        ----------
-        option: str
-            String that define the option.
-        value: Any
-            The new value for the given option.
-        """
-        self.treewidget.on_option_update(option, value)
 
     # ---- Public API
     # ------------------------------------------------------------------------
@@ -344,6 +310,7 @@ class ExplorerWidget(PluginMainWidget):
 # =============================================================================
 class FileExplorerTest(QWidget):
     def __init__(self, directory=None, file_associations={}):
+        self.CONF_SECTION = 'explorer'
         super().__init__()
 
         if directory is not None:
@@ -351,11 +318,10 @@ class FileExplorerTest(QWidget):
         else:
             self.directory = osp.dirname(osp.abspath(__file__))
 
-        options = ExplorerWidget.DEFAULT_OPTIONS
-        options['file_associations'] = file_associations
-        self.explorer = ExplorerWidget('explorer', None, parent=self)
-        self.explorer._setup(options)
-        self.explorer.setup(options)
+        self.explorer = ExplorerWidget('explorer', self, parent=self)
+        self.explorer.set_conf('file_associations', file_associations)
+        self.explorer._setup()
+        self.explorer.setup()
         self.label_dir = QLabel("<b>Open dir:</b>")
         self.label_file = QLabel("<b>Open file:</b>")
         self.label1 = QLabel()
@@ -394,35 +360,16 @@ class FileExplorerTest(QWidget):
         self.explorer.sig_dir_opened.connect(
             lambda: self.explorer.treewidget.refresh('..'))
         self.explorer.sig_open_file_requested.connect(self.label1.setText)
-        self.explorer.sig_option_changed.connect(
-           lambda x, y: self.label3.setText('option_changed: %r, %r' % (x, y)))
 
 
-class ProjectExplorerTest(QWidget):
-    def __init__(self, parent=None):
-        QWidget.__init__(self, parent)
-        vlayout = QVBoxLayout()
-        self.setLayout(vlayout)
-        self.treewidget = FilteredDirView(self)
-        self.treewidget.setup_view()
-        self.treewidget.set_root_path(osp.dirname(osp.abspath(__file__)))
-        self.treewidget.set_folder_names(['variableexplorer'])
-        self.treewidget.setup_project_view()
-        vlayout.addWidget(self.treewidget)
-
-
-def test(file_explorer):
+def test():
     from spyder.utils.qthelpers import qapplication
     app = qapplication()
-    if file_explorer:
-        test = FileExplorerTest()
-    else:
-        test = ProjectExplorerTest()
+    test = FileExplorerTest()
     test.resize(640, 480)
     test.show()
     app.exec_()
 
 
 if __name__ == "__main__":
-    test(file_explorer=True)
-    test(file_explorer=False)
+    test()

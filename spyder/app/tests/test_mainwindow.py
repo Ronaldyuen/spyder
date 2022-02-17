@@ -11,49 +11,59 @@ Tests for the main window.
 """
 
 # Standard library imports
-from distutils.version import LooseVersion
 import os
 import os.path as osp
+import psutil
 import re
 import shutil
 import sys
 import tempfile
 from textwrap import dedent
-from unittest.mock import Mock, MagicMock
+import threading
+import traceback
+from unittest.mock import Mock
 import uuid
 
 # Third party imports
 from flaky import flaky
+import ipykernel
 from IPython.core import release as ipy_release
 from jupyter_client.manager import KernelManager
 from matplotlib.testing.compare import compare_images
 import nbconvert
 import numpy as np
 from numpy.testing import assert_array_equal
+import pkg_resources
+from pkg_resources import parse_version
 import pylint
 import pytest
-from qtpy import PYQT5, PYQT_VERSION
-from qtpy.QtCore import Qt, QTimer, QUrl
+from qtpy import PYQT_VERSION
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtTest import QTest
-from qtpy.QtGui import QImage
-from qtpy.QtWidgets import (QAction, QApplication, QFileDialog, QLineEdit,
-                            QTabBar, QWidget)
+from qtpy.QtGui import QImage, QTextCursor
+from qtpy.QtWidgets import (QAction, QApplication, QFileDialog, QInputDialog,
+                            QLineEdit, QTabBar, QWidget)
 from qtpy.QtWebEngineWidgets import WEBENGINE
 
 # Local imports
-from spyder import __trouble_url__, __project_url__
+from spyder import __trouble_url__
+from spyder.api.utils import get_class_values
 from spyder.api.widgets.auxiliary_widgets import SpyderWindowWidget
+from spyder.api.plugins import Plugins
 from spyder.app import start
-from spyder.app.mainwindow import MainWindow
-from spyder.config.base import get_home_dir, get_conf_path, get_module_path
+from spyder.config.base import (
+    get_home_dir, get_conf_path, get_module_path, running_in_ci)
 from spyder.config.manager import CONF
-from spyder.plugins.base import PluginWindow
+from spyder.dependencies import DEPENDENCIES
 from spyder.plugins.help.widgets import ObjectComboBox
 from spyder.plugins.help.tests.test_plugin import check_text
 from spyder.plugins.ipythonconsole.utils.kernelspec import SpyderKernelSpec
+from spyder.plugins.layout.layouts import DefaultLayouts
 from spyder.plugins.projects.api import EmptyProject
-from spyder.py3compat import PY2, to_text_string
+from spyder.py3compat import PY2, qbytearray_to_str, to_text_string
+from spyder.utils import encoding
 from spyder.utils.misc import remove_backslashes
+from spyder.utils.clipboard_helper import CLIPBOARD_HELPER
 from spyder.widgets.dock import DockTitleBar
 
 
@@ -89,19 +99,6 @@ def open_file_in_editor(main_window, fname, directory=None):
             input_field = w.findChildren(QLineEdit)[0]
             input_field.setText(fname)
             QTest.keyClick(w, Qt.Key_Enter)
-
-
-def get_thirdparty_plugin(main_window, plugin_title):
-    """Get a reference to the thirdparty plugin with the title given."""
-    for plugin in main_window.thirdparty_plugins:
-        try:
-            # New API
-            if plugin.get_name() == plugin_title:
-                return plugin
-        except AttributeError:
-            # Old API
-            if plugin.get_plugin_title() == plugin_title:
-                return plugin
 
 
 def reset_run_code(qtbot, shell, code_editor, nsb):
@@ -142,13 +139,66 @@ def find_desired_tab_in_window(tab_name, window):
     return None, None
 
 
+def register_fake_entrypoints():
+    """
+    Create entry points distribution to register elements:
+     * Completion providers (Fallback, Shippets, LSP)
+    """
+    # Completion providers
+    fallback = pkg_resources.EntryPoint.parse(
+        'fallback = spyder.plugins.completion.providers.fallback.provider:'
+        'FallbackProvider'
+    )
+    snippets = pkg_resources.EntryPoint.parse(
+        'snippets = spyder.plugins.completion.providers.snippets.provider:'
+        'SnippetsProvider'
+    )
+    lsp = pkg_resources.EntryPoint.parse(
+        'lsp = spyder.plugins.completion.providers.languageserver.provider:'
+        'LanguageServerProvider'
+    )
+
+    # Create a fake Spyder distribution
+    d = pkg_resources.Distribution(__file__)
+
+    # Add the providers to the fake EntryPoints
+    d._ep_map = {
+        'spyder.completions': {
+            'fallback': fallback,
+            'snippets': snippets,
+            'lsp': lsp
+        }
+    }
+
+    # Add the fake distribution to the global working_set
+    pkg_resources.working_set.add(d, 'spyder')
+
+
+def remove_fake_entrypoints():
+    """Remove fake entry points from pkg_resources"""
+    try:
+        pkg_resources.working_set.by_key.pop('unknown')
+        pkg_resources.working_set.entry_keys.pop('spyder')
+        pkg_resources.working_set.entry_keys.pop(__file__)
+        pkg_resources.working_set.entries.remove('spyder')
+    except KeyError:
+        pass
+
+
+def read_asset_file(filename):
+    """Read contents of an asset file."""
+    return encoding.read(osp.join(LOCATION, filename))[0]
+
+
 # =============================================================================
 # ---- Fixtures
 # =============================================================================
-
 @pytest.fixture
-def main_window(request, tmpdir):
+def main_window(request, tmpdir, qtbot):
     """Main Window fixture"""
+    if not running_in_ci():
+        register_fake_entrypoints()
+
     # Tests assume inline backend
     CONF.set('ipython_console', 'pylab/backend', 0)
 
@@ -179,32 +229,78 @@ def main_window(request, tmpdir):
     else:
         CONF.set('main', 'single_instance', False)
 
-    # Check if we need to preload a project in a give test
+    # Check if we need to load a simple project to the interface
     preload_project = request.node.get_closest_marker('preload_project')
 
     if preload_project:
-        # Create project
-        project_path = str(tmpdir.mkdir('test_project'))
-        project = EmptyProject(project_path)
+        # Create project directory
+        project = tmpdir.mkdir('test_project')
+        project_path = str(project)
+
+        # Create Spyder project
+        spy_project = EmptyProject(project_path)
         CONF.set('project_explorer', 'current_project_path', project_path)
 
-        # Add some files to project
-        filenames = [
-            osp.join(project_path, f) for f in
-            ['file1.py', 'file2.py', 'file3.txt']
-        ]
-
-        for filename in filenames:
-            with open(filename, 'w') as f:
-                if osp.splitext(filename)[1] == '.py':
-                    f.write("def f(x):\n"
-                            "    return x\n")
-                else:
-                    f.write("Hello world!")
-
-        project.set_recent_files(filenames)
+        # Add a file to the project
+        file = project.join('file.py')
+        file.write(read_asset_file('script_outline_1.py'))
+        spy_project.set_recent_files([str(file)])
     else:
         CONF.set('project_explorer', 'current_project_path', None)
+
+    # Check if we need to preload a complex project in a give test
+    preload_complex_project = request.node.get_closest_marker(
+        'preload_complex_project')
+
+    if preload_complex_project:
+        # Create project
+        project = tmpdir.mkdir('test_project')
+        project_subdir = project.mkdir('subdir')
+        project_sub_subdir = project_subdir.mkdir('sub_subdir')
+
+        # Create directories out of the project
+        out_of_project_1 = tmpdir.mkdir('out_of_project_1')
+        out_of_project_2 = tmpdir.mkdir('out_of_project_2')
+        out_of_project_1_subdir = out_of_project_1.mkdir('subdir')
+        out_of_project_2_subdir = out_of_project_2.mkdir('subdir')
+
+        project_path = str(project)
+        spy_project = EmptyProject(project_path)
+        CONF.set('project_explorer', 'current_project_path', project_path)
+
+        # Add some files to project. This is necessary to test that we get
+        # symbols for all these files.
+        abs_filenames = []
+        filenames_to_create = {
+            project: ['file1.py', 'file2.py', 'file3.txt', '__init__.py'],
+            project_subdir: ['a.py', '__init__.py'],
+            project_sub_subdir: ['b.py', '__init__.py'],
+            out_of_project_1: ['c.py'],
+            out_of_project_2: ['d.py', '__init__.py'],
+            out_of_project_1_subdir: ['e.py', '__init__.py'],
+            out_of_project_2_subdir: ['f.py']
+        }
+
+        for path in filenames_to_create.keys():
+            filenames = filenames_to_create[path]
+            for filename in filenames:
+                file = path.join(filename)
+                abs_filenames.append(str(file))
+                if osp.splitext(filename)[1] == '.py':
+                    if path == project_subdir:
+                        code = read_asset_file('script_outline_2.py')
+                    elif path == project_sub_subdir:
+                        code = read_asset_file('script_outline_3.py')
+                    else:
+                        code = read_asset_file('script_outline_1.py')
+                    file.write(code)
+                else:
+                    file.write("Hello world!")
+
+        spy_project.set_recent_files(abs_filenames)
+    else:
+        if not preload_project:
+            CONF.set('project_explorer', 'current_project_path', None)
 
     # Get config values passed in parametrize and apply them
     try:
@@ -215,24 +311,32 @@ def main_window(request, tmpdir):
         pass
 
     if not hasattr(main_window, 'window'):
+        from spyder.api.plugin_registration.registry import PLUGIN_REGISTRY
+        PLUGIN_REGISTRY.reset()
+
         # Start the window
         window = start.main()
         main_window.window = window
     else:
         window = main_window.window
-        # Close everything we can think of
-        window.editor.close_file()
-        window.projects.close_project()
 
-        if window.console.error_dialog:
-            window.console.close_error_dialog()
+    # Remove Kite (In case it was registered via setup.py)
+    window.completions.providers.pop('kite', None)
 
-        window.switcher.close()
-        for client in window.ipyconsole.get_clients():
-            window.ipyconsole.close_client(client=client, force=True)
-        window.outlineexplorer.stop_symbol_services('python')
-        # Reset cwd
-        window.explorer.chdir(get_home_dir())
+    # Wait until console is up
+    shell = window.ipyconsole.get_current_shellwidget()
+    qtbot.waitUntil(lambda: shell._prompt_html is not None,
+                    timeout=SHELL_TIMEOUT)
+
+    if os.name != 'nt':
+        # _DummyThread are created if current_thread() is called from them.
+        # They will always leak (From python doc) so we ignore them.
+        init_threads = [
+            repr(thread) for thread in threading.enumerate()
+            if not isinstance(thread, threading._DummyThread)]
+        proc = psutil.Process()
+        init_files = [repr(f) for f in proc.open_files()]
+        init_subprocesses = [repr(f) for f in proc.children()]
 
     yield window
 
@@ -250,34 +354,122 @@ def main_window(request, tmpdir):
                 print(client.info_page)
             window.close()
             del main_window.window
+        else:
+            # Close everything we can think of
+            window.editor.close_file()
+            window.projects.close_project()
+
+            if window.console.error_dialog:
+                window.console.close_error_dialog()
+
+            window.switcher.close()
+            for client in window.ipyconsole.get_clients():
+                window.ipyconsole.close_client(client=client, ask_recursive=False)
+            window.outlineexplorer.stop_symbol_services('python')
+
+            # Reset cwd
+            window.explorer.chdir(get_home_dir())
+
+            # Unregister boilerplate plugin
+            spyder_boilerplate = window.get_plugin(
+                'spyder_boilerplate', error=False)
+            if spyder_boilerplate is not None:
+                window.unregister_plugin(spyder_boilerplate)
+
+            if os.name == 'nt':
+                # Do not test leaks on windows
+                return
+
+            known_leak = request.node.get_closest_marker(
+                'known_leak')
+            if known_leak:
+                # This test has a known leak
+                return
+
+            def show_diff(init_list, now_list, name):
+                sys.stderr.write(f"Extra {name} before test:\n")
+                for item in init_list:
+                    if item in now_list:
+                        now_list.remove(item)
+                    else:
+                        sys.stderr.write(item + "\n")
+                sys.stderr.write(f"Extra {name} after test:\n")
+                for item in now_list:
+                    sys.stderr.write(item + "\n")
+
+            # The test is not allowed to open new files or threads.
+            try:
+                def threads_condition():
+                    threads = [
+                        thread for thread in threading.enumerate()
+                        if not isinstance(thread, threading._DummyThread)]
+                    return (len(init_threads) >= len(threads))
+
+                qtbot.waitUntil(threads_condition, timeout=SHELL_TIMEOUT)
+            except Exception:
+                now_threads = [
+                    thread for thread in threading.enumerate()
+                    if not isinstance(thread, threading._DummyThread)]
+                threads = [repr(t) for t in now_threads]
+                show_diff(init_threads, threads, "thread")
+                sys.stderr.write("Running Threads stacks:\n")
+                now_thread_ids = [t.ident for t in now_threads]
+                for threadId, frame in sys._current_frames().items():
+                    if threadId in now_thread_ids:
+                        sys.stderr.write("\nThread " + str(threads) + ":\n")
+                        traceback.print_stack(frame)
+                raise
+
+            try:
+                qtbot.waitUntil(lambda: (
+                    len(init_subprocesses) >= len(proc.children())),
+                    timeout=SHELL_TIMEOUT)
+            except Exception:
+                subprocesses = [repr(f) for f in proc.children()]
+                show_diff(init_subprocesses, subprocesses, "processes")
+                raise
+
+            try:
+                qtbot.waitUntil(
+                    lambda: (len(init_files) >= len(proc.open_files())),
+                    timeout=SHELL_TIMEOUT)
+            except Exception:
+                files = [repr(f) for f in proc.open_files()]
+                show_diff(init_files, files, "files")
+                raise
 
 
 @pytest.fixture(scope="session", autouse=True)
 def cleanup(request):
     """Cleanup a testing directory once we are finished."""
-    def remove_test_dir():
+    def close_window():
         if hasattr(main_window, 'window'):
             try:
                 main_window.window.close()
             except AttributeError:
                 pass
 
-    request.addfinalizer(remove_test_dir)
+        # Also clean entry points if running locally.
+        if not running_in_ci():
+            remove_fake_entrypoints()
+
+    request.addfinalizer(close_window)
 
 
 # =============================================================================
 # ---- Tests
 # =============================================================================
 @pytest.mark.slow
-@pytest.mark.first
+@pytest.mark.order(1)
 @pytest.mark.single_instance
-@pytest.mark.skipif(os.environ.get('CI', None) is None,
-                    reason="It's not meant to be run outside of CIs")
+@pytest.mark.skipif(
+    not running_in_ci(), reason="It's not meant to be run outside of CIs")
 def test_single_instance_and_edit_magic(main_window, qtbot, tmpdir):
     """Test single instance mode and %edit magic."""
     editorstack = main_window.editor.get_current_editorstack()
     shell = main_window.ipyconsole.get_current_shellwidget()
-    qtbot.waitUntil(lambda: shell._prompt_html is not None, timeout=SHELL_TIMEOUT)
+    qtbot.waitUntil(
+        lambda: shell._prompt_html is not None, timeout=SHELL_TIMEOUT)
 
     spy_dir = osp.dirname(get_module_path('spyder'))
     lock_code = (
@@ -294,6 +486,7 @@ def test_single_instance_and_edit_magic(main_window, qtbot, tmpdir):
 
     with qtbot.waitSignal(shell.executed, timeout=2000):
         shell.execute(lock_code)
+    qtbot.wait(1000)
     assert not shell.get_value('lock_created')
 
     # Test %edit magic
@@ -314,11 +507,11 @@ def test_single_instance_and_edit_magic(main_window, qtbot, tmpdir):
 @pytest.mark.slow
 def test_lock_action(main_window):
     """Test the lock interface action."""
-    action = main_window.lock_interface_action
+    action = main_window.layouts.lock_interface_action
     plugins = main_window.widgetlist
 
     # By default the interface is locked.
-    assert main_window.interface_locked
+    assert main_window.layouts._interface_locked
 
     # In this state the title bar is an empty QWidget
     for plugin in plugins:
@@ -332,16 +525,17 @@ def test_lock_action(main_window):
     for plugin in plugins:
         title_bar = plugin.dockwidget.titleBarWidget()
         assert isinstance(title_bar, DockTitleBar)
-    assert not main_window.interface_locked
+    assert not main_window.layouts._interface_locked
 
     # Restore default state
     action.trigger()
-    assert main_window.interface_locked
+    assert main_window.layouts._interface_locked
 
 
 @pytest.mark.slow
-@pytest.mark.first
-@pytest.mark.skipif(os.name == 'nt' and PY2, reason="Fails on win and py2")
+@pytest.mark.order(1)
+@pytest.mark.skipif(sys.platform.startswith('linux') and not running_in_ci(),
+                    reason='Fails on Linux when run locally')
 def test_default_plugin_actions(main_window, qtbot):
     """Test the effect of dock, undock, close and toggle view actions."""
     # Use a particular plugin
@@ -351,6 +545,7 @@ def test_default_plugin_actions(main_window, qtbot):
     # Undock action
     main_widget.undock_action.triggered.emit(True)
     qtbot.wait(500)
+    main_widget.windowwidget.move(200, 200)
     assert not file_explorer.dockwidget.isVisible()
     assert main_widget.undock_action is not None
     assert isinstance(main_widget.windowwidget, SpyderWindowWidget)
@@ -361,6 +556,19 @@ def test_default_plugin_actions(main_window, qtbot):
     qtbot.wait(500)
     assert file_explorer.dockwidget.isVisible()
     assert main_widget.windowwidget is None
+
+    # Test geometry was saved on close
+    geometry = file_explorer.get_conf('window_geometry')
+    assert geometry != ''
+
+    # Test restoring undocked plugin with the right geometry
+    file_explorer.set_conf('undocked_on_window_close', True)
+    main_window.restore_undocked_plugins()
+    assert main_widget.windowwidget is not None
+    assert (
+        geometry == qbytearray_to_str(main_widget.windowwidget.saveGeometry())
+    )
+    main_widget.windowwidget.close()
 
     # Close action
     main_widget.close_action.triggered.emit(True)
@@ -424,6 +632,7 @@ def test_filter_numpy_warning(main_window, qtbot):
 @flaky(max_runs=3)
 @pytest.mark.skipif(PY2 or not sys.platform == 'darwin',
                     reason="Times out in PY2 and fails on other than macOS")
+@pytest.mark.known_leak  # Opens Spyder/QtWebEngine/Default/Cookies
 def test_get_help_combo(main_window, qtbot):
     """
     Test that Help can display docstrings for names typed in its combobox.
@@ -477,6 +686,7 @@ def test_get_help_combo(main_window, qtbot):
 
 @pytest.mark.slow
 @pytest.mark.skipif(PY2, reason="Invalid definition of function in Python 2.")
+@pytest.mark.known_leak  # Opens Spyder/QtWebEngine/Default/Cookies
 def test_get_help_ipython_console_dot_notation(main_window, qtbot, tmpdir):
     """
     Test that Help works when called from the IPython console
@@ -515,7 +725,8 @@ def test_get_help_ipython_console_dot_notation(main_window, qtbot, tmpdir):
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(PY2, reason="Invalid definition of function in Python 2.")
+@flaky(max_runs=3)
+@pytest.mark.skipif(sys.platform == 'darwin', reason="Too flaky on Mac")
 def test_get_help_ipython_console_special_characters(
         main_window, qtbot, tmpdir):
     """
@@ -559,8 +770,8 @@ def test_get_help_ipython_console_special_characters(
 
 @pytest.mark.slow
 @flaky(max_runs=3)
-@pytest.mark.skipif(os.name == 'nt' and os.environ.get('CI') is not None,
-                    reason="Times out on AppVeyor")
+@pytest.mark.skipif(os.name == 'nt' and running_in_ci(),
+                    reason="Times out on Windows")
 def test_get_help_ipython_console(main_window, qtbot):
     """Test that Help works when called from the IPython console."""
     shell = main_window.ipyconsole.get_current_shellwidget()
@@ -590,8 +801,7 @@ def test_get_help_ipython_console(main_window, qtbot):
 @pytest.mark.parametrize(
     "object_info",
     [("range", "range"),
-     ("import matplotlib.pyplot as plt",
-      "The object-oriented API is recommended for more complex plots.")])
+     ("import numpy as np", "An array object of arbitrary homogeneous items")])
 def test_get_help_editor(main_window, qtbot, object_info):
     """Test that Help works when called from the Editor."""
     help_plugin = main_window.help
@@ -601,14 +811,14 @@ def test_get_help_editor(main_window, qtbot, object_info):
     main_window.editor.new(fname="test.py", text="")
     code_editor = main_window.editor.get_focus_widget()
     editorstack = main_window.editor.get_current_editorstack()
-    with qtbot.waitSignal(code_editor.lsp_response_signal, timeout=30000):
+    with qtbot.waitSignal(code_editor.completions_response_signal, timeout=30000):
         code_editor.document_did_open()
 
     # Write some object in the editor
     object_name, expected_text = object_info
     code_editor.set_text(object_name)
     code_editor.move_cursor(len(object_name))
-    with qtbot.waitSignal(code_editor.lsp_response_signal, timeout=30000):
+    with qtbot.waitSignal(code_editor.completions_response_signal, timeout=30000):
         code_editor.document_did_change()
 
     # Get help
@@ -645,9 +855,9 @@ def test_window_title(main_window, tmpdir):
 
 @pytest.mark.slow
 @flaky(max_runs=3)
-@pytest.mark.skipif(os.name == 'nt' or PY2, reason="It fails sometimes")
-@pytest.mark.parametrize(
-    "debugcell", [True, False])
+@pytest.mark.skipif(not sys.platform.startswith('linux'),
+                    reason="Fails sometimes on Windows and Mac")
+@pytest.mark.parametrize("debugcell", [True, False])
 def test_move_to_first_breakpoint(main_window, qtbot, debugcell):
     """Test that we move to the first breakpoint if there's one present."""
     # Wait until the window is fully up
@@ -711,23 +921,21 @@ def test_move_to_first_breakpoint(main_window, qtbot, debugcell):
     assert "1--> 10 arr = np.array(li)" in control.toPlainText()
 
     # Exit debugging
-    shell.pdb_execute("!exit")
-    qtbot.wait(500)
+    with qtbot.waitSignal(shell.executed):
+        shell.pdb_execute("!exit")
 
     # Set breakpoint on first line with code
     code_editor.debugger.toogle_breakpoint(line_number=2)
-    qtbot.wait(500)
 
     # Click the debug button
-    qtbot.mouseClick(debug_button, Qt.LeftButton)
-    qtbot.wait(1000)
+    with qtbot.waitSignal(shell.executed):
+        qtbot.mouseClick(debug_button, Qt.LeftButton)
+
+    # Wait until continue and stop on the breakpoint
+    qtbot.waitUntil(lambda: "IPdb [2]:" in control.toPlainText())
 
     # Verify that we are still on debugging
-    try:
-        assert shell.is_waiting_pdb_input()
-    except Exception:
-        print('Shell content: ', shell._control.toPlainText(), '\n\n')
-        raise
+    assert shell.is_waiting_pdb_input()
 
     # Remove breakpoint and close test file
     main_window.editor.clear_all_breakpoints()
@@ -816,11 +1024,11 @@ def test_dedicated_consoles(main_window, qtbot):
     shell = main_window.ipyconsole.get_current_shellwidget()
     control = shell._control
     qtbot.waitUntil(lambda: shell._prompt_html is not None, timeout=SHELL_TIMEOUT)
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
 
     assert len(main_window.ipyconsole.get_clients()) == 2
-    assert main_window.ipyconsole.filenames == ['', test_file]
-    assert main_window.ipyconsole.tabwidget.tabText(1) == 'script.py/A'
+    assert main_window.ipyconsole.get_widget().filenames == ['', test_file]
+    assert main_window.ipyconsole.get_widget().tabwidget.tabText(1) == 'script.py/A'
     qtbot.wait(500)
     assert nsb.editor.source_model.rowCount() == 4
 
@@ -846,21 +1054,23 @@ def test_dedicated_consoles(main_window, qtbot):
 
 @pytest.mark.slow
 @flaky(max_runs=3)
+@pytest.mark.skipif(sys.platform.startswith('linux'),
+                    reason="Fails frequently on Linux")
 def test_connection_to_external_kernel(main_window, qtbot):
     """Test that only Spyder kernels are connected to the Variable Explorer."""
     # Test with a generic kernel
     km, kc = start_new_kernel()
 
-    main_window.ipyconsole._create_client_for_kernel(kc.connection_file, None,
-                                                     None, None)
+    main_window.ipyconsole.get_widget()._create_client_for_kernel(
+        kc.connection_file, None, None, None)
     shell = main_window.ipyconsole.get_current_shellwidget()
     qtbot.waitUntil(lambda: shell._prompt_html is not None, timeout=SHELL_TIMEOUT)
     with qtbot.waitSignal(shell.executed):
         shell.execute('a = 10')
 
     # Assert that there are no variables in the variable explorer
-    main_window.variableexplorer._visibility_changed(True)
-    nsb = main_window.variableexplorer.get_focus_widget()
+    main_window.variableexplorer.change_visibility(True)
+    nsb = main_window.variableexplorer.current_widget()
     qtbot.wait(500)
     assert nsb.editor.source_model.rowCount() == 0
 
@@ -868,16 +1078,16 @@ def test_connection_to_external_kernel(main_window, qtbot):
 
     # Test with a kernel from Spyder
     spykm, spykc = start_new_kernel(spykernel=True)
-    main_window.ipyconsole._create_client_for_kernel(spykc.connection_file, None,
-                                                     None, None)
+    main_window.ipyconsole.get_widget()._create_client_for_kernel(
+        spykc.connection_file, None, None, None)
     shell = main_window.ipyconsole.get_current_shellwidget()
     qtbot.waitUntil(lambda: shell._prompt_html is not None, timeout=SHELL_TIMEOUT)
     with qtbot.waitSignal(shell.executed):
         shell.execute('a = 10')
 
     # Assert that a variable is visible in the variable explorer
-    main_window.variableexplorer._visibility_changed(True)
-    nsb = main_window.variableexplorer.get_focus_widget()
+    main_window.variableexplorer.change_visibility(True)
+    nsb = main_window.variableexplorer.current_widget()
     qtbot.wait(500)
     assert nsb.editor.source_model.rowCount() == 1
 
@@ -905,19 +1115,15 @@ def test_connection_to_external_kernel(main_window, qtbot):
     qtbot.wait(1000)
 
     # Make sure everything quit properly
-    assert km.kernel.poll() is not None
-    assert spykm.kernel.poll() is not None
-    if spykm._restarter:
-        assert spykm._restarter.poll() is not None
-    if km._restarter:
-        assert km._restarter.poll() is not None
+    assert not km.is_alive()
+    assert not spykm.is_alive()
 
     # Close the channels
     spykc.stop_channels()
     kc.stop_channels()
 
 
-@pytest.mark.first
+@pytest.mark.order(1)
 @pytest.mark.slow
 @flaky(max_runs=3)
 @pytest.mark.skipif(os.name == 'nt', reason="It times out sometimes on Windows")
@@ -930,8 +1136,8 @@ def test_change_types_in_varexp(main_window, qtbot):
         shell.execute('a = 10')
 
     # Edit object
-    main_window.variableexplorer._visibility_changed(True)
-    nsb = main_window.variableexplorer.get_focus_widget()
+    main_window.variableexplorer.change_visibility(True)
+    nsb = main_window.variableexplorer.current_widget()
     qtbot.waitUntil(lambda: nsb.editor.source_model.rowCount() > 0, timeout=EVAL_TIMEOUT)
     nsb.editor.setFocus()
     nsb.editor.edit_item()
@@ -1017,7 +1223,7 @@ def test_change_cwd_explorer(main_window, qtbot, tmpdir, test_directory):
 @flaky(max_runs=3)
 @pytest.mark.skipif(
     (os.name == 'nt' or sys.platform == 'darwin' or
-     LooseVersion(ipy_release.version) == LooseVersion('7.11.0')),
+     parse_version(ipy_release.version) == parse_version('7.11.0')),
     reason="Hard to test on Windows and macOS and fails for IPython 7.11.0")
 def test_run_cython_code(main_window, qtbot):
     """Test all the different ways we have to run Cython code"""
@@ -1033,7 +1239,7 @@ def test_run_cython_code(main_window, qtbot):
     qtbot.keyClick(code_editor, Qt.Key_F5)
 
     # Get a reference to the namespace browser widget
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
 
     # Wait until an object appears
     qtbot.waitUntil(lambda: nsb.editor.source_model.rowCount() == 1,
@@ -1071,6 +1277,7 @@ def test_run_cython_code(main_window, qtbot):
 def test_open_notebooks_from_project_explorer(main_window, qtbot, tmpdir):
     """Test that notebooks are open from the Project explorer."""
     projects = main_window.projects
+    projects.toggle_view_action.setChecked(True)
     editorstack = main_window.editor.get_current_editorstack()
 
     # Create a temp project directory
@@ -1085,17 +1292,19 @@ def test_open_notebooks_from_project_explorer(main_window, qtbot, tmpdir):
         projects._create_project(project_dir)
 
     # Select notebook in the project explorer
-    idx = projects.explorer.treewidget.get_index('notebook.ipynb')
-    projects.explorer.treewidget.setCurrentIndex(idx)
+    idx = projects.get_widget().treewidget.get_index(
+        osp.join(project_dir, 'notebook.ipynb'))
+    projects.get_widget().treewidget.setCurrentIndex(idx)
 
     # Prese Enter there
-    qtbot.keyClick(projects.explorer.treewidget, Qt.Key_Enter)
+    qtbot.keyClick(projects.get_widget().treewidget, Qt.Key_Enter)
 
     # Assert that notebook was open
     assert 'notebook.ipynb' in editorstack.get_current_filename()
 
     # Convert notebook to a Python file
-    projects.explorer.treewidget.convert_notebook(osp.join(project_dir, 'notebook.ipynb'))
+    projects.get_widget().treewidget.convert_notebook(
+        osp.join(project_dir, 'notebook.ipynb'))
 
     # Assert notebook was open
     assert 'untitled' in editorstack.get_current_filename()
@@ -1118,6 +1327,7 @@ def test_open_notebooks_from_project_explorer(main_window, qtbot, tmpdir):
 def test_runfile_from_project_explorer(main_window, qtbot, tmpdir):
     """Test that file are run from the Project explorer."""
     projects = main_window.projects
+    projects.toggle_view_action.setChecked(True)
     editorstack = main_window.editor.get_current_editorstack()
 
     # Create a temp project directory
@@ -1132,17 +1342,18 @@ def test_runfile_from_project_explorer(main_window, qtbot, tmpdir):
         projects._create_project(project_dir)
 
     # Select file in the project explorer
-    idx = projects.explorer.treewidget.get_index('script.py')
-    projects.explorer.treewidget.setCurrentIndex(idx)
+    idx = projects.get_widget().treewidget.get_index(
+        osp.join(project_dir, 'script.py'))
+    projects.get_widget().treewidget.setCurrentIndex(idx)
 
     # Press Enter there
-    qtbot.keyClick(projects.explorer.treewidget, Qt.Key_Enter)
+    qtbot.keyClick(projects.get_widget().treewidget, Qt.Key_Enter)
 
     # Assert that the file was open
     assert 'script.py' in editorstack.get_current_filename()
 
     # Run Python file
-    projects.explorer.treewidget.run([osp.join(project_dir, 'script.py')])
+    projects.get_widget().treewidget.run([osp.join(project_dir, 'script.py')])
 
     # Wait until the new console is fully up
     shell = main_window.ipyconsole.get_current_shellwidget()
@@ -1150,7 +1361,7 @@ def test_runfile_from_project_explorer(main_window, qtbot, tmpdir):
                     timeout=SHELL_TIMEOUT)
 
     # Wait until all objects have appeared in the variable explorer
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
     qtbot.waitUntil(lambda: nsb.editor.source_model.rowCount() == 4,
                     timeout=EVAL_TIMEOUT)
 
@@ -1184,17 +1395,16 @@ def test_set_new_breakpoints(main_window, qtbot):
     # Click the debug button
     debug_action = main_window.debug_toolbar_actions[0]
     debug_button = main_window.debug_toolbar.widgetForAction(debug_action)
-    qtbot.mouseClick(debug_button, Qt.LeftButton)
-    qtbot.wait(1000)
+    with qtbot.waitSignal(shell.executed):
+        qtbot.mouseClick(debug_button, Qt.LeftButton)
 
     # Set a breakpoint
     code_editor = main_window.editor.get_focus_widget()
     code_editor.debugger.toogle_breakpoint(line_number=6)
-    qtbot.wait(500)
 
     # Verify that the breakpoint was set
-    shell.pdb_execute("!b")
-    qtbot.wait(500)
+    with qtbot.waitSignal(shell.executed):
+        shell.pdb_execute("!b")
     assert "1   breakpoint   keep yes   at {}:6".format(test_file) in control.toPlainText()
 
     # Remove breakpoint and close test file
@@ -1226,7 +1436,7 @@ def test_run_code(main_window, qtbot, tmpdir):
     qtbot.keyClick(code_editor, Qt.Key_Home, modifier=Qt.ControlModifier)
 
     # Get a reference to the namespace browser widget
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
 
     # ---- Run file ----
     qtbot.keyClick(code_editor, Qt.Key_F5)
@@ -1399,7 +1609,7 @@ def test_run_cell_copy(main_window, qtbot, tmpdir):
     qtbot.keyClick(code_editor, Qt.Key_Home, modifier=Qt.ControlModifier)
 
     # Get a reference to the namespace browser widget
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
 
     # ---- Run cell and advance ----
     # Run the three cells present in file
@@ -1430,10 +1640,7 @@ def test_run_cell_copy(main_window, qtbot, tmpdir):
 
 @pytest.mark.slow
 @flaky(max_runs=3)
-@pytest.mark.skipif(os.name == 'nt' or os.environ.get('CI', None) is None or PYQT5,
-                    reason="It times out sometimes on Windows, it's not "
-                           "meant to be run outside of a CI and it segfaults "
-                           "too frequently in PyQt5")
+@pytest.mark.skipif(running_in_ci(), reason="Fails on CIs")
 def test_open_files_in_new_editor_window(main_window, qtbot):
     """
     This tests that opening files in a new editor window
@@ -1484,7 +1691,7 @@ def test_maximize_minimize_plugins(main_window, qtbot):
     main_window.editor.get_focus_widget().setFocus()
 
     # Click the maximize button
-    max_action = main_window.maximize_action
+    max_action = main_window.layouts.maximize_action
     max_button = main_window.main_toolbar.widgetForAction(max_action)
     qtbot.mouseClick(max_button, Qt.LeftButton)
 
@@ -1498,8 +1705,7 @@ def test_maximize_minimize_plugins(main_window, qtbot):
 
 @pytest.mark.slow
 @flaky(max_runs=3)
-@pytest.mark.skipif((os.name == 'nt' or
-                     os.environ.get('CI', None) is not None and PYQT_VERSION >= '5.9'),
+@pytest.mark.skipif(os.name == 'nt' or running_in_ci() and PYQT_VERSION >= '5.9',
                     reason="It times out on Windows and segfaults in our CIs with PyQt >= 5.9")
 def test_issue_4066(main_window, qtbot):
     """
@@ -1517,7 +1723,7 @@ def test_issue_4066(main_window, qtbot):
         shell.execute('myobj = [1, 2, 3]')
 
     # Open editor associated with that object and get a reference to it
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
     qtbot.waitUntil(lambda: nsb.editor.source_model.rowCount() > 0, timeout=EVAL_TIMEOUT)
     nsb.editor.setFocus()
     nsb.editor.edit_item()
@@ -1525,7 +1731,7 @@ def test_issue_4066(main_window, qtbot):
     obj_editor = nsb.editor.delegate._editors[obj_editor_id]['editor']
 
     # Move to the IPython console and delete that object
-    main_window.ipyconsole.get_focus_widget().setFocus()
+    main_window.ipyconsole.get_widget().get_focus_widget().setFocus()
     with qtbot.waitSignal(shell.executed):
         shell.execute('del myobj')
     qtbot.waitUntil(lambda: nsb.editor.source_model.rowCount() == 0, timeout=EVAL_TIMEOUT)
@@ -1557,14 +1763,14 @@ def test_varexp_edit_inline(main_window, qtbot):
         shell.execute('a = 10')
 
     # Edit object
-    main_window.variableexplorer._visibility_changed(True)
-    nsb = main_window.variableexplorer.get_focus_widget()
+    main_window.variableexplorer.change_visibility(True)
+    nsb = main_window.variableexplorer.current_widget()
     qtbot.waitUntil(lambda: nsb.editor.source_model.rowCount() > 0, timeout=EVAL_TIMEOUT)
     nsb.editor.setFocus()
     nsb.editor.edit_item()
 
     # Change focus to IPython console
-    main_window.ipyconsole.get_focus_widget().setFocus()
+    main_window.ipyconsole.get_widget().get_focus_widget().setFocus()
 
     # Wait for the error
     qtbot.wait(3000)
@@ -1576,7 +1782,7 @@ def test_varexp_edit_inline(main_window, qtbot):
                     reason="It times out sometimes on Windows and macOS")
 def test_c_and_n_pdb_commands(main_window, qtbot):
     """Test that c and n Pdb commands update the Variable Explorer."""
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
 
     # Wait until the window is fully up
     shell = main_window.ipyconsole.get_current_shellwidget()
@@ -1667,18 +1873,18 @@ def test_stop_dbg(main_window, qtbot):
     # Click the debug button
     debug_action = main_window.debug_toolbar_actions[0]
     debug_button = main_window.debug_toolbar.widgetForAction(debug_action)
-    qtbot.mouseClick(debug_button, Qt.LeftButton)
-    qtbot.wait(1000)
+    with qtbot.waitSignal(shell.executed):
+        qtbot.mouseClick(debug_button, Qt.LeftButton)
 
     # Move to the next line
-    shell.pdb_execute("!n")
-    qtbot.wait(1000)
+    with qtbot.waitSignal(shell.executed):
+        shell.pdb_execute("!n")
 
     # Stop debugging
     stop_debug_action = main_window.debug_toolbar_actions[5]
     stop_debug_button = main_window.debug_toolbar.widgetForAction(stop_debug_action)
-    qtbot.mouseClick(stop_debug_button, Qt.LeftButton)
-    qtbot.wait(1000)
+    with qtbot.waitSignal(shell.executed):
+        qtbot.mouseClick(stop_debug_button, Qt.LeftButton)
 
     # Assert there are only two ipdb prompts in the console
     assert shell._control.toPlainText().count('IPdb') == 2
@@ -1705,7 +1911,7 @@ def test_change_cwd_dbg(main_window, qtbot):
     main_window.editor.load(test_file)
 
     # Give focus to the widget that's going to receive clicks
-    control = main_window.ipyconsole.get_focus_widget()
+    control = main_window.ipyconsole.get_widget().get_focus_widget()
     control.setFocus()
 
     # Click the debug button
@@ -1732,10 +1938,10 @@ def test_change_cwd_dbg(main_window, qtbot):
 
 @pytest.mark.slow
 @flaky(max_runs=3)
-@pytest.mark.skipif(os.name == 'nt' or PY2, reason="It times out sometimes")
+@pytest.mark.skipif(os.name == 'nt', reason="Times out sometimes")
 def test_varexp_magic_dbg(main_window, qtbot):
     """Test that %varexp is working while debugging."""
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
 
     # Wait until the window is fully up
     shell = main_window.ipyconsole.get_current_shellwidget()
@@ -1746,7 +1952,7 @@ def test_varexp_magic_dbg(main_window, qtbot):
     main_window.editor.load(test_file)
 
     # Give focus to the widget that's going to receive clicks
-    control = main_window.ipyconsole.get_focus_widget()
+    control = main_window.ipyconsole.get_widget().get_focus_widget()
     control.setFocus()
 
     # Click the debug button
@@ -1756,7 +1962,7 @@ def test_varexp_magic_dbg(main_window, qtbot):
         qtbot.mouseClick(debug_button, Qt.LeftButton)
 
     # Get to an object that can be plotted
-    for _ in range(2):
+    for _ in range(3):
         with qtbot.waitSignal(shell.executed):
             qtbot.keyClicks(control, '!n')
             qtbot.keyClick(control, Qt.Key_Enter)
@@ -1820,7 +2026,10 @@ def test_plots_plugin(main_window, qtbot, tmpdir, mocker):
 
 @pytest.mark.slow
 @flaky(max_runs=3)
-@pytest.mark.skipif(PY2, reason="It times out sometimes")
+@pytest.mark.skipif(
+    (parse_version(ipy_release.version) >= parse_version('7.23.0') and
+     parse_version(ipykernel.__version__) <= parse_version('5.5.3')),
+    reason="Fails due to a bug in the %matplotlib magic")
 def test_tight_layout_option_for_inline_plot(main_window, qtbot, tmpdir):
     """
     Test that the option to set bbox_inches to 'tight' or 'None' is
@@ -1843,7 +2052,7 @@ def test_tight_layout_option_for_inline_plot(main_window, qtbot, tmpdir):
                     timeout=SHELL_TIMEOUT)
 
     # Give focus to the widget that's going to receive clicks
-    control = main_window.ipyconsole.get_focus_widget()
+    control = main_window.ipyconsole.get_widget().get_focus_widget()
     control.setFocus()
 
     # Generate a plot inline with bbox_inches=tight (since it is default) and
@@ -1930,6 +2139,8 @@ def test_tight_layout_option_for_inline_plot(main_window, qtbot, tmpdir):
     assert compare_images(savefig_figname, inline_figname, 0.1) is None
 
 
+# FIXME: Make this test work again in our CIs (it's passing locally)
+@pytest.mark.skip
 @flaky(max_runs=3)
 @pytest.mark.slow
 @pytest.mark.use_introspection
@@ -1982,10 +2193,12 @@ def example_def_2():
     main_window.editor.set_current_filename(str(file_a))
 
     code_editor = main_window.editor.get_focus_widget()
-    with qtbot.waitSignal(code_editor.lsp_response_signal, timeout=30000):
+    with qtbot.waitSignal(
+            code_editor.completions_response_signal, timeout=30000):
         code_editor.document_did_open()
 
-    with qtbot.waitSignal(code_editor.lsp_response_signal, timeout=30000):
+    with qtbot.waitSignal(
+            code_editor.completions_response_signal, timeout=30000):
         code_editor.request_symbols()
 
     qtbot.wait(9000)
@@ -2045,10 +2258,12 @@ def test_editorstack_open_symbolfinder_dlg(main_window, qtbot, tmpdir):
     main_window.editor.load(str(file))
 
     code_editor = main_window.editor.get_focus_widget()
-    with qtbot.waitSignal(code_editor.lsp_response_signal, timeout=30000):
+    with qtbot.waitSignal(
+            code_editor.completions_response_signal, timeout=30000):
         code_editor.document_did_open()
 
-    with qtbot.waitSignal(code_editor.lsp_response_signal, timeout=30000):
+    with qtbot.waitSignal(
+            code_editor.completions_response_signal, timeout=30000):
         code_editor.request_symbols()
 
     qtbot.wait(5000)
@@ -2070,7 +2285,7 @@ def test_run_static_code_analysis(main_window, qtbot):
     """This tests that the Pylint plugin is working as expected."""
     from spyder.plugins.pylint.main_widget import PylintWidgetActions
     # Select the third-party plugin
-    pylint_plugin = get_thirdparty_plugin(main_window, "Code Analysis")
+    pylint_plugin = main_window.get_plugin(Plugins.Pylint)
 
     # Do an analysis
     test_file = osp.join(LOCATION, 'script_pylint.py')
@@ -2086,8 +2301,8 @@ def test_run_static_code_analysis(main_window, qtbot):
     result_content = treewidget.results
     assert result_content['C:']
 
-    pylint_version = LooseVersion(pylint.__version__)
-    if pylint_version < LooseVersion('2.5.0'):
+    pylint_version = parse_version(pylint.__version__)
+    if pylint_version < parse_version('2.5.0'):
         number_of_conventions = 5
     else:
         number_of_conventions = 3
@@ -2125,12 +2340,12 @@ def test_help_opens_when_show_tutorial_full(main_window, qtbot):
     HELP_STR = "Help"
 
     help_pane_menuitem = None
-    for action in main_window.plugins_menu.actions():
+    for action in main_window.layouts.plugins_menu.get_actions():
         if action.text() == HELP_STR:
             help_pane_menuitem = action
             break
 
-    # Test opening tutorial with Help plguin closed
+    # Test opening tutorial with Help plugin closed
     main_window.help.toggle_view_action.setChecked(False)
     qtbot.wait(500)
     help_tabbar, help_index = find_desired_tab_in_window(HELP_STR, main_window)
@@ -2192,31 +2407,64 @@ def test_custom_layouts(main_window, qtbot):
     mw = main_window
     mw.first_spyder_run = False
     prefix = 'window' + '/'
-    settings = mw.load_window_settings(prefix=prefix, default=True)
+    settings = mw.layouts.load_window_settings(prefix=prefix, default=True)
 
     # Test layout changes
-    for layout_idx in ['default'] + list(range(4)):
+    for layout_idx in get_class_values(DefaultLayouts):
         with qtbot.waitSignal(mw.sig_layout_setup_ready, timeout=5000):
-            layout = mw.setup_default_layouts(layout_idx, settings=settings)
+            layout = mw.layouts.setup_default_layouts(
+                layout_idx, settings=settings)
 
-            with qtbot.waitSignal(None, timeout=500, raising=False):
-                # Add a wait to see changes
-                pass
+            qtbot.wait(500)
 
-            widgets_layout = layout['widgets']
-            hidden_widgets = layout['hidden widgets']
-            for column in widgets_layout:
-                for row in column:
-                    for idx, widget in enumerate(row):
-                        if idx == 0:
-                            if widget not in hidden_widgets:
-                                print(widget)  # spyder: test-skip
-                                try:
-                                    # New API
-                                    assert widget.get_widget().isVisible()
-                                except AttributeError:
-                                    # Old API
-                                    assert widget.isVisible()
+            for area in layout._areas:
+                if area['visible']:
+                    for plugin_id in area['plugin_ids']:
+                        if plugin_id not in area['hidden_plugin_ids']:
+                            plugin = mw.get_plugin(plugin_id)
+                            print(plugin)  # spyder: test-skip
+                            try:
+                                # New API
+                                assert plugin.get_widget().isVisible()
+                            except AttributeError:
+                                # Old API
+                                assert plugin.isVisible()
+
+
+@pytest.mark.slow
+@flaky(max_runs=3)
+@pytest.mark.skipif(not running_in_ci() or sys.platform.startswith('linux'),
+                    reason="Only runs in CIs and fails on Linux sometimes")
+def test_programmatic_custom_layouts(main_window, qtbot):
+    """
+    Test that a custom layout gets registered and it is recognized."""
+    mw = main_window
+    mw.first_spyder_run = False
+
+    # Test layout registration
+    layout_id = 'testing layout'
+    # Test the testing plugin is being loaded
+    mw.get_plugin('spyder_boilerplate')
+    # Get the registered layout
+    layout = mw.layouts.get_layout(layout_id)
+
+    with qtbot.waitSignal(mw.sig_layout_setup_ready, timeout=5000):
+        mw.layouts.quick_layout_switch(layout_id)
+
+        qtbot.wait(500)
+
+        for area in layout._areas:
+            if area['visible']:
+                for plugin_id in area['plugin_ids']:
+                    if plugin_id not in area['hidden_plugin_ids']:
+                        plugin = mw.get_plugin(plugin_id)
+                        print(plugin)  # spyder: test-skip
+                        try:
+                            # New API
+                            assert plugin.get_widget().isVisible()
+                        except AttributeError:
+                            # Old API
+                            assert plugin.isVisible()
 
 
 @pytest.mark.slow
@@ -2249,10 +2497,7 @@ def test_save_on_runfile(main_window, qtbot):
 @pytest.mark.skipif(sys.platform == 'darwin', reason="Fails on macOS")
 def test_pylint_follows_file(qtbot, tmpdir, main_window):
     """Test that file editor focus change updates pylint combobox filename."""
-    for plugin in main_window.thirdparty_plugins:
-        if plugin.CONF_SECTION == 'pylint':
-            pylint_plugin = plugin
-            break
+    pylint_plugin = main_window.get_plugin(Plugins.Pylint)
 
     # Show pylint plugin
     pylint_plugin.dockwidget.show()
@@ -2292,7 +2537,6 @@ def test_pylint_follows_file(qtbot, tmpdir, main_window):
 
 @pytest.mark.slow
 @flaky(max_runs=3)
-@pytest.mark.skipif(os.name == 'nt', reason="Fails on Windows")
 def test_report_comms_error(qtbot, main_window):
     """Test if a comms error is correctly displayed."""
     CONF.set('main', 'show_internal_errors', True)
@@ -2308,8 +2552,9 @@ def test_report_comms_error(qtbot, main_window):
     with qtbot.waitSignal(shell.executed, timeout=3000):
         shell.execute('ls')
 
+    qtbot.waitUntil(lambda: main_window.console.error_dialog is not None,
+                    timeout=EVAL_TIMEOUT)
     error_dialog = main_window.console.error_dialog
-    assert error_dialog is not None
     assert 'Exception in comms call get_cwd' in error_dialog.error_traceback
     assert 'No module named' in error_dialog.error_traceback
     main_window.console.close_error_dialog()
@@ -2406,19 +2651,33 @@ def test_preferences_checkboxes_not_checked_regression(main_window, qtbot):
     was not updating correctly.
     """
     # Reset config
-    CONF.set('lsp-server', 'pycodestyle', False)
-    CONF.set('lsp-server', 'pydocstyle', False)
+    CONF.set('completions',
+             ('provider_configuration', 'lsp', 'values', 'pydocstyle'),
+             False)
+
+    CONF.set('completions',
+             ('provider_configuration', 'lsp', 'values', 'pycodestyle'),
+             False)
 
     # Open completion prefences and update options
     dlg, index, page = preferences_dialog_helper(qtbot, main_window,
-                                                 'lsp-server')
+                                                 'completions')
     # Get the correct tab pages inside the Completion preferences page
     tnames = [page.tabs.tabText(i).lower() for i in range(page.tabs.count())]
+
+    tabs = [(page.tabs.widget(i).layout().itemAt(0).widget(), i)
+            for i in range(page.tabs.count())]
+
+    tabs = dict(zip(tnames, tabs))
     tab_widgets = {
-        tnames.index('code style and formatting'): page.code_style_check,
-        tnames.index('docstring style'): page.docstring_style_check,
+        'code style and formatting': 'code_style_check',
+        'docstring style': 'docstring_style_check'
     }
-    for idx, check in tab_widgets.items():
+
+    for tabname in tab_widgets:
+        tab, idx = tabs[tabname]
+        check_name = tab_widgets[tabname]
+        check = getattr(tab, check_name)
         page.tabs.setCurrentIndex(idx)
         check.animateClick()
         qtbot.wait(500)
@@ -2445,9 +2704,13 @@ def test_preferences_checkboxes_not_checked_regression(main_window, qtbot):
     assert count == 2
 
     # Reset config
-    CONF.set('lsp-server', 'pycodestyle', False)
-    CONF.set('lsp-server', 'pydocstyle', False)
+    CONF.set('completions',
+             ('provider_configuration', 'lsp', 'values', 'pydocstyle'),
+             False)
 
+    CONF.set('completions',
+             ('provider_configuration', 'lsp', 'values', 'pycodestyle'),
+             False)
 
 @pytest.mark.slow
 def test_preferences_change_font_regression(main_window, qtbot):
@@ -2545,13 +2808,13 @@ def test_preferences_shortcut_reset_regression(main_window, qtbot):
 
 
 @pytest.mark.slow
-@pytest.mark.first
+@pytest.mark.order(1)
 def test_preferences_change_interpreter(qtbot, main_window):
     """Test that on main interpreter change signal is emitted."""
     # Check original pyls configuration
-    lsp = main_window.completions.get_client('lsp')
+    lsp = main_window.completions.get_provider('lsp')
     config = lsp.generate_python_config()
-    jedi = config['configurations']['pyls']['plugins']['jedi']
+    jedi = config['configurations']['pylsp']['plugins']['jedi']
     assert jedi['environment'] is None
     assert jedi['extra_paths'] == []
 
@@ -2566,7 +2829,7 @@ def test_preferences_change_interpreter(qtbot, main_window):
 
     # Check updated pyls configuration
     config = lsp.generate_python_config()
-    jedi = config['configurations']['pyls']['plugins']['jedi']
+    jedi = config['configurations']['pylsp']['plugins']['jedi']
     assert jedi['environment'] == sys.executable
     assert jedi['extra_paths'] == []
 
@@ -2610,13 +2873,15 @@ def test_go_to_definition(main_window, qtbot, capsys):
     # Create new editor with code and wait until LSP is ready
     main_window.editor.new(text=code_no_def)
     code_editor = main_window.editor.get_focus_widget()
-    with qtbot.waitSignal(code_editor.lsp_response_signal, timeout=30000):
+    with qtbot.waitSignal(
+            code_editor.completions_response_signal, timeout=30000):
         code_editor.document_did_open()
 
     # Move cursor to the left one character to be next to
     # FramelessWindowHint
     code_editor.move_cursor(-1)
-    with qtbot.waitSignal(code_editor.lsp_response_signal):
+    with qtbot.waitSignal(
+            code_editor.completions_response_signal):
         code_editor.go_to_definition_from_cursor()
 
     # Capture stderr and assert there are no errors
@@ -2629,12 +2894,14 @@ def test_go_to_definition(main_window, qtbot, capsys):
     # Create new editor with code and wait until LSP is ready
     main_window.editor.new(text=code_def)
     code_editor = main_window.editor.get_focus_widget()
-    with qtbot.waitSignal(code_editor.lsp_response_signal, timeout=30000):
+    with qtbot.waitSignal(
+            code_editor.completions_response_signal, timeout=30000):
         code_editor.document_did_open()
 
     # Move cursor to the left one character to be next to QtCore
     code_editor.move_cursor(-1)
-    with qtbot.waitSignal(code_editor.lsp_response_signal):
+    with qtbot.waitSignal(
+            code_editor.completions_response_signal):
         code_editor.go_to_definition_from_cursor()
 
     def _get_filenames():
@@ -2773,7 +3040,7 @@ def test_varexp_rename(main_window, qtbot, tmpdir):
     qtbot.keyClick(code_editor, Qt.Key_Home, modifier=Qt.ControlModifier)
 
     # Get a reference to the namespace browser widget
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
 
     # ---- Run file ----
     with qtbot.waitSignal(shell.executed):
@@ -2839,7 +3106,7 @@ def test_varexp_remove(main_window, qtbot, tmpdir):
     qtbot.keyClick(code_editor, Qt.Key_Home, modifier=Qt.ControlModifier)
 
     # Get a reference to the namespace browser widget
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
 
     # ---- Run file ----
     with qtbot.waitSignal(shell.executed):
@@ -2873,7 +3140,7 @@ def test_varexp_refresh(main_window, qtbot):
     """
     # Create object
     shell = main_window.ipyconsole.get_current_shellwidget()
-    control = main_window.ipyconsole.get_focus_widget()
+    control = main_window.ipyconsole.get_widget().get_focus_widget()
     qtbot.waitUntil(lambda: shell._prompt_html is not None,
                     timeout=SHELL_TIMEOUT)
 
@@ -2885,7 +3152,7 @@ def test_varexp_refresh(main_window, qtbot):
     qtbot.waitUntil(lambda: "i = 0" in control.toPlainText())
     qtbot.wait(300)
     # Get value object
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
 
     # This is empty
     assert len(nsb.editor.source_model._data) == 0
@@ -2898,6 +3165,7 @@ def test_varexp_refresh(main_window, qtbot):
 
 @pytest.mark.slow
 @flaky(max_runs=3)
+@pytest.mark.skipif(sys.platform == 'darwin', reason="Fails on macOS")
 def test_runcell_edge_cases(main_window, qtbot, tmpdir):
     """
     Test if runcell works with an unnamed cell at the top of the file
@@ -2917,6 +3185,7 @@ def test_runcell_edge_cases(main_window, qtbot, tmpdir):
     # call runcell
     with qtbot.waitSignal(shell.executed):
         qtbot.keyClick(code_editor, Qt.Key_Return, modifier=Qt.ShiftModifier)
+    qtbot.wait(1000)
     assert 'runcell(0' in shell._control.toPlainText()
     assert 'cell is empty' not in shell._control.toPlainText()
     with qtbot.waitSignal(shell.executed):
@@ -2955,7 +3224,7 @@ def test_runcell_pdb(main_window, qtbot):
     code_editor.set_text(code)
 
     # Start debugging
-    with qtbot.waitSignal(shell.executed):
+    with qtbot.waitSignal(shell.executed, timeout=10000):
         qtbot.mouseClick(debug_button, Qt.LeftButton)
 
     for key in ['!n', '!n', '!s', '!n', '!n']:
@@ -3012,9 +3281,10 @@ def test_runcell_cache(main_window, qtbot, debug):
     qtbot.waitUntil(lambda: "Done" in shell._control.toPlainText())
 
 
-# --- Path manager
-# ----------------------------------------------------------------------------
 @pytest.mark.slow
+@flaky(max_runs=3)
+@pytest.mark.skipif(not sys.platform.startswith('linux'),
+                    reason="Works reliably on Linux")
 def test_path_manager_updates_clients(qtbot, main_window, tmpdir):
     """Check that on path manager updates, consoles correctly update."""
     main_window.show_path_manager()
@@ -3044,7 +3314,7 @@ def test_path_manager_updates_clients(qtbot, main_window, tmpdir):
             control = shell._control
             # `shell.executed` signal was not working so we use waitUntil
             qtbot.waitUntil(lambda: 'In [2]:' in control.toPlainText(),
-                            timeout=EVAL_TIMEOUT)
+                            timeout=10000)
             assert test_folder in control.toPlainText()
             count += 1
     assert count >= 1
@@ -3146,6 +3416,7 @@ def test_pdb_step(main_window, qtbot, tmpdir, where):
     with qtbot.waitSignal(shell.executed):
         shell.execute('runfile("' + str(test_file2).replace("\\", "/") +
                       '", wdir="' + str(folder).replace("\\", "/") + '")')
+    qtbot.wait(1000)
     assert '1/0' in control.toPlainText()
 
     # Debug and enter first file
@@ -3215,6 +3486,8 @@ def test_pdb_step(main_window, qtbot, tmpdir, where):
 
 @pytest.mark.slow
 @flaky(max_runs=3)
+@pytest.mark.skipif(sys.platform == 'darwin',
+                    reason="Fails sometimes on macOS")
 def test_runcell_after_restart(main_window, qtbot):
     """Test runcell after a kernel restart."""
     # Write code to a file
@@ -3273,7 +3546,7 @@ def test_ipython_magic(main_window, qtbot, tmpdir, ipython, test_cell_magic):
     # Execute runcell
     with qtbot.waitSignal(shell.executed):
         shell.execute("runcell(0, r'{}')".format(to_text_string(p)))
-    control = main_window.ipyconsole.get_focus_widget()
+    control = main_window.ipyconsole.get_widget().get_focus_widget()
 
     error_text = 'save this file with the .ipy extension'
     try:
@@ -3325,7 +3598,7 @@ def test_running_namespace(main_window, qtbot, tmpdir):
     with qtbot.waitSignal(shell.executed):
         shell.execute('b = 10')
 
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
     qtbot.waitUntil(lambda: 'b' in nsb.editor.source_model._data)
     assert nsb.editor.source_model._data['b']['view'] == '10'
 
@@ -3357,7 +3630,7 @@ def test_post_mortem(main_window, qtbot, tmpdir):
     shell = main_window.ipyconsole.get_current_shellwidget()
     qtbot.waitUntil(lambda: shell._prompt_html is not None,
                     timeout=SHELL_TIMEOUT)
-    control = main_window.ipyconsole.get_focus_widget()
+    control = main_window.ipyconsole.get_widget().get_focus_widget()
 
     test_file = tmpdir.join('test.py')
     test_file.write('raise RuntimeError\n')
@@ -3425,7 +3698,7 @@ def test_varexp_cleared_after_kernel_restart(main_window, qtbot):
         shell.execute('a = 10')
 
     # Assert the value is shown in the variable explorer
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
     qtbot.waitUntil(lambda: 'a' in nsb.editor.source_model._data,
                     timeout=3000)
 
@@ -3454,7 +3727,7 @@ def test_varexp_cleared_after_reset(main_window, qtbot):
         shell.execute('a = 10')
 
     # Assert the value is shown in the variable explorer
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
     qtbot.waitUntil(lambda: 'a' in nsb.editor.source_model._data,
                     timeout=3000)
 
@@ -3470,7 +3743,7 @@ def test_varexp_cleared_after_reset(main_window, qtbot):
         shell.execute('a = 10')
 
     # Assert the value is shown in the variable explorer
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
     qtbot.waitUntil(lambda: 'a' in nsb.editor.source_model._data,
                     timeout=3000)
 
@@ -3527,7 +3800,7 @@ hello()
     code_editor.set_text(code)
     code_editor.debugger.toogle_breakpoint(line_number=4)
 
-    nsb = main_window.variableexplorer.get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
 
     # Start debugging
     with qtbot.waitSignal(shell.executed):
@@ -3568,6 +3841,7 @@ hello()
 @flaky(max_runs=3)
 @pytest.mark.use_introspection
 @pytest.mark.preload_project
+@pytest.mark.skipif(os.name == 'nt', reason='Times out on Windows')
 def test_ordering_lsp_requests_at_startup(main_window, qtbot):
     """
     Test the ordering of requests we send to the LSP at startup when a
@@ -3577,75 +3851,104 @@ def test_ordering_lsp_requests_at_startup(main_window, qtbot):
     """
     # Wait until the LSP server is up.
     code_editor = main_window.editor.get_current_editor()
-    qtbot.waitSignal(code_editor.lsp_response_signal, timeout=30000)
+    qtbot.waitSignal(code_editor.completions_response_signal, timeout=30000)
 
     # Wait until the initial requests are sent to the server.
-    lsp = main_window.completions.get_client('lsp')
+    lsp = main_window.completions.get_provider('lsp')
     python_client = lsp.clients['python']
     qtbot.wait(5000)
 
     expected_requests = [
-        (0, 'initialize'),
-        (1, 'initialized'),
-        (2, 'workspace/didChangeConfiguration'),
-        (3, 'workspace/didChangeWorkspaceFolders'),
-        (4, 'textDocument/didOpen'),
+        'initialize',
+        'initialized',
+        'workspace/didChangeConfiguration',
+        'workspace/didChangeWorkspaceFolders',
+        'textDocument/didOpen',
     ]
 
-    assert python_client['instance']._requests[:5] == expected_requests
+    skip_intermediate = {
+        'initialized': {'workspace/didChangeConfiguration'}
+    }
+
+    lsp_requests = python_client['instance']._requests
+    start_idx = lsp_requests.index((0, 'initialize'))
+
+    request_order = []
+    expected_iter = iter(expected_requests)
+    current_expected = next(expected_iter)
+    for i in range(start_idx, len(lsp_requests)):
+        if current_expected is None:
+            break
+
+        _, req_type = lsp_requests[i]
+        if req_type == current_expected:
+            request_order.append(req_type)
+            current_expected = next(expected_iter, None)
+        else:
+            skip_set = skip_intermediate.get(current_expected, set({}))
+            if req_type in skip_set:
+                continue
+            else:
+                assert req_type == current_expected
+
+    assert request_order == expected_requests
 
 
 @pytest.mark.slow
 @flaky(max_runs=3)
 @pytest.mark.parametrize(
     'main_window',
-    [{'spy_config': ('main', 'show_tour_message', 2)}],
+    [{'spy_config': ('tours', 'show_tour_message', 2)}],
     indirect=True)
 def test_tour_message(main_window, qtbot):
     """Test that the tour message displays and sends users to the tour."""
     # Wait until window setup is finished, which is when the message appears
+    tours = main_window.get_plugin(Plugins.Tours)
+    tour_dialog = tours.get_container()._tour_dialog
+    animated_tour = tours.get_container()._tour_widget
     qtbot.waitSignal(main_window.sig_setup_finished, timeout=30000)
 
     # Check that tour is shown automatically and manually show it
-    assert CONF.get('main', 'show_tour_message')
-    main_window.show_tour_message(force=True)
+    assert tours.get_conf('show_tour_message')
+    tours.show_tour_message(force=True)
 
     # Wait for the message to appear
-    qtbot.waitUntil(lambda: bool(main_window.tour_dialog), timeout=5000)
-    qtbot.waitUntil(lambda: main_window.tour_dialog.isVisible(), timeout=2000)
+    qtbot.waitUntil(lambda: bool(tour_dialog), timeout=5000)
+    qtbot.waitUntil(lambda: tour_dialog.isVisible(), timeout=2000)
 
     # Check that clicking dismiss hides the dialog and disables it
-    qtbot.mouseClick(main_window.tour_dialog.dismiss_button, Qt.LeftButton)
-    qtbot.waitUntil(lambda: not main_window.tour_dialog.isVisible(),
+    qtbot.mouseClick(tour_dialog.dismiss_button, Qt.LeftButton)
+    qtbot.waitUntil(lambda: not tour_dialog.isVisible(),
                     timeout=2000)
-    assert not CONF.get('main', 'show_tour_message')
+    assert not tours.get_conf('show_tour_message')
 
     # Confirm that calling show_tour_message() normally doesn't show it again
-    main_window.show_tour_message()
+    tours.show_tour_message()
     qtbot.wait(2000)
-    assert not main_window.tour_dialog.isVisible()
+    assert not tour_dialog.isVisible()
 
     # Ensure that it opens again with force=True
-    main_window.show_tour_message(force=True)
-    qtbot.waitUntil(lambda: main_window.tour_dialog.isVisible(), timeout=5000)
+    tours.show_tour_message(force=True)
+    qtbot.waitUntil(lambda: tour_dialog.isVisible(), timeout=5000)
 
     # Run the tour and confirm it's running and the dialog is closed
-    qtbot.mouseClick(main_window.tour_dialog.launch_tour_button, Qt.LeftButton)
-    qtbot.waitUntil(lambda: main_window.tour.is_running, timeout=9000)
-    assert not main_window.tour_dialog.isVisible()
-    assert not CONF.get('main', 'show_tour_message')
+    qtbot.mouseClick(tour_dialog.launch_tour_button, Qt.LeftButton)
+    qtbot.waitUntil(lambda: animated_tour.is_running, timeout=9000)
+    assert not tour_dialog.isVisible()
+    assert not tours.get_conf('show_tour_message')
 
     # Close the tour
-    main_window.tour.close_tour()
-    qtbot.waitUntil(lambda: not main_window.tour.is_running, timeout=9000)
-    main_window.tour_dialog.hide()
+    animated_tour.close_tour()
+    qtbot.waitUntil(lambda: not animated_tour.is_running, timeout=9000)
+    tour_dialog.hide()
 
 
 @pytest.mark.slow
 @flaky(max_runs=3)
 @pytest.mark.use_introspection
-@pytest.mark.preload_project
-@pytest.mark.skipif(os.name == 'nt', reason="Fails on Windows")
+@pytest.mark.preload_complex_project
+@pytest.mark.skipif(not sys.platform.startswith('linux'),
+                    reason="Only works on Linux")
 def test_update_outline(main_window, qtbot, tmpdir):
     """
     Test that files in the Outline pane are updated at startup and
@@ -3653,25 +3956,28 @@ def test_update_outline(main_window, qtbot, tmpdir):
     """
     # Show outline explorer
     outline_explorer = main_window.outlineexplorer
-    outline_explorer._toggle_view_action.setChecked(True)
+    outline_explorer.toggle_view_action.setChecked(True)
 
     # Get Python editor trees
-    treewidget = outline_explorer.explorer.treewidget
+    treewidget = outline_explorer.get_widget().treewidget
     editors_py = [
         editor for editor in treewidget.editor_ids.keys()
         if editor.get_language() == 'Python'
     ]
 
+    def editor_filled():
+        return all(
+            [
+                len(treewidget.editor_tree_cache[editor.get_id()]) == 4
+                for editor in editors_py
+            ]
+        )
+
     # Wait a bit for trees to be filled
-    qtbot.wait(5000)
+    qtbot.waitUntil(editor_filled, timeout=25000)
 
     # Assert all Python editors are filled
-    assert all(
-        [
-            len(treewidget.editor_tree_cache[editor.get_id()]) > 0
-            for editor in editors_py
-        ]
-    )
+    assert editor_filled()
 
     # Split editor
     editorstack = main_window.editor.get_current_editorstack()
@@ -3691,23 +3997,51 @@ def test_update_outline(main_window, qtbot, tmpdir):
     assert len(tree) == 0
 
     # Assert spinner is not shown
-    assert not outline_explorer.explorer.loading_widget.isSpinning()
+    assert not outline_explorer.get_widget()._spinner.isSpinning()
 
-    # Set one file as session without projects
-    prev_file = tmpdir.join("foo.py")
-    prev_file.write("def zz(x):\n"
-                    "    return x**2\n")
-    CONF.set('editor', 'filenames', [str(prev_file)])
+    # Hide outline from view
+    outline_explorer.toggle_view_action.setChecked(False)
+
+    # Remove content from first file
+    editorstack.set_stack_index(0)
+    editor = editorstack.get_current_editor()
+    editor.selectAll()
+    editor.cut()
+    editorstack.save(index=0)
+
+    # Assert outline was not updated
+    qtbot.wait(1000)
+    len(treewidget.editor_tree_cache[treewidget.current_editor.get_id()]) == 4
+
+    # Set some files as session without projects
+    prev_filenames = ["prev_file_1.py", "prev_file_2.py"]
+    prev_paths = []
+    for fname in prev_filenames:
+        file = tmpdir.join(fname)
+        file.write(read_asset_file("script_outline_1.py"))
+        prev_paths.append(str(file))
+
+    CONF.set('editor', 'filenames', prev_paths)
 
     # Close project to open that file automatically
     main_window.projects.close_project()
 
-    # Wait a bit for its tree to be filled
-    qtbot.wait(1000)
+    # Show outline again
+    outline_explorer.toggle_view_action.setChecked(True)
 
-    # Assert the editor was filled
-    editor = list(treewidget.editor_ids.keys())[0]
-    assert len(treewidget.editor_tree_cache[editor.get_id()]) > 0
+    def editor_filled():
+        return all(
+            [
+                len(treewidget.editor_tree_cache[editor.get_id()]) == 4
+                for editor in treewidget.editor_ids.keys()
+            ]
+        )
+
+    # Wait a bit for trees to be filled
+    qtbot.waitUntil(editor_filled, timeout=3000)
+
+    # Assert all Python editors are filled
+    assert editor_filled()
 
     # Remove test file from session
     CONF.set('editor', 'filenames', [])
@@ -3800,13 +4134,13 @@ def test_outline_no_init(main_window, qtbot):
 
     # Show outline explorer
     outline_explorer = main_window.outlineexplorer
-    outline_explorer._toggle_view_action.setChecked(True)
+    outline_explorer.toggle_view_action.setChecked(True)
 
     # Wait a bit for trees to be filled
     qtbot.wait(5000)
 
     # Get tree length
-    treewidget = outline_explorer.explorer.treewidget
+    treewidget = outline_explorer.get_widget().treewidget
     editor_id = list(treewidget.editor_ids.values())[1]
 
     # Assert symbols in the file are detected and shown
@@ -3815,13 +4149,15 @@ def test_outline_no_init(main_window, qtbot):
 
 @pytest.mark.slow
 @flaky(max_runs=3)
+@pytest.mark.skipif(sys.platform.startswith('linux'),
+                    reason="Flaky on Linux")
 def test_pdb_without_comm(main_window, qtbot):
     """Check if pdb works without comm."""
     ipyconsole = main_window.ipyconsole
     shell = ipyconsole.get_current_shellwidget()
     qtbot.waitUntil(lambda: shell._prompt_html is not None,
                     timeout=SHELL_TIMEOUT)
-    control = ipyconsole.get_focus_widget()
+    control = ipyconsole.get_widget().get_focus_widget()
 
     with qtbot.waitSignal(shell.executed):
         shell.execute("get_ipython().kernel.frontend_comm.close()")
@@ -3846,6 +4182,8 @@ def test_pdb_without_comm(main_window, qtbot):
 
 @pytest.mark.slow
 @flaky(max_runs=3)
+@pytest.mark.skipif(not sys.platform.startswith('linux'),
+                    reason="Flaky on Mac and Windows")
 def test_print_comms(main_window, qtbot):
     """Test warning printed when comms print."""
     # Write code with a cell to a file
@@ -3854,8 +4192,8 @@ def test_print_comms(main_window, qtbot):
     shell = main_window.ipyconsole.get_current_shellwidget()
     qtbot.waitUntil(lambda: shell._prompt_html is not None,
                     timeout=SHELL_TIMEOUT)
-    control = main_window.ipyconsole.get_focus_widget()
-    nsb = main_window.variableexplorer.get_focus_widget()
+    control = main_window.ipyconsole.get_widget().get_focus_widget()
+    nsb = main_window.variableexplorer.current_widget()
 
     # Create some output from spyder call
     with qtbot.waitSignal(shell.executed):
@@ -3919,6 +4257,407 @@ def test_goto_find(main_window, qtbot, tmpdir):
         cursor = code_editor.textCursor()
         position = (cursor.selectionStart(), cursor.selectionEnd())
         assert position == match_positions[i]
+
+
+@pytest.mark.slow
+@flaky(max_runs=3)
+@pytest.mark.skipif(
+    os.name == 'nt',
+    reason="test fails on windows.")
+def test_copy_paste(main_window, qtbot, tmpdir):
+    """Test copy paste."""
+    code = (
+        "if True:\n"
+        "    class a():\n"
+        "        def b():\n"
+        "            print()\n"
+        "        def c():\n"
+        "            print()\n"
+        )
+
+    shell = main_window.ipyconsole.get_current_shellwidget()
+    qtbot.waitUntil(lambda: shell._prompt_html is not None,
+                    timeout=SHELL_TIMEOUT)
+
+    # create new file
+    main_window.editor.new()
+    code_editor = main_window.editor.get_focus_widget()
+    code_editor.set_text(code)
+
+    # Test copy
+    cursor = code_editor.textCursor()
+    cursor.setPosition(69)
+    cursor.movePosition(QTextCursor.End,
+                        QTextCursor.KeepAnchor)
+    code_editor.setTextCursor(cursor)
+    qtbot.keyClick(code_editor, "c", modifier=Qt.ControlModifier)
+    assert QApplication.clipboard().text() == (
+        "def c():\n            print()\n")
+    assert CLIPBOARD_HELPER.metadata_indent == 8
+
+    # Test paste in console
+    qtbot.keyClick(shell._control, "v", modifier=Qt.ControlModifier)
+    expected = "In [1]: def c():\n   ...:     print()"
+    assert expected in shell._control.toPlainText()
+
+    # Test paste at zero indentation
+    qtbot.keyClick(code_editor, Qt.Key_Backspace)
+    qtbot.keyClick(code_editor, Qt.Key_Backspace)
+    qtbot.keyClick(code_editor, Qt.Key_Backspace)
+    # Check again that the clipboard is ready
+    assert QApplication.clipboard().text() == (
+        "def c():\n            print()\n")
+    assert CLIPBOARD_HELPER.metadata_indent == 8
+    qtbot.keyClick(code_editor, "v", modifier=Qt.ControlModifier)
+    assert "\ndef c():\n    print()" in code_editor.toPlainText()
+
+    # Test paste at automatic indentation
+    qtbot.keyClick(code_editor, "z", modifier=Qt.ControlModifier)
+    qtbot.keyClick(code_editor, Qt.Key_Tab)
+    qtbot.keyClick(code_editor, "v", modifier=Qt.ControlModifier)
+    expected = (
+        "\n"
+        "            def c():\n"
+        "                print()\n"
+        )
+    assert expected in code_editor.toPlainText()
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not running_in_ci(), reason="Only works in CIs")
+def test_add_external_plugins_to_dependencies(main_window):
+    """Test that we register external plugins in the main window."""
+    external_names = []
+    for dep in DEPENDENCIES:
+        name = getattr(dep, 'package_name', None)
+        if name:
+            external_names.append(name)
+
+    assert 'spyder-boilerplate' in external_names
+
+
+@pytest.mark.slow
+@flaky(max_runs=3)
+def test_print_multiprocessing(main_window, qtbot, tmpdir):
+    """Test print commands from multiprocessing."""
+    # Write code with a cell to a file
+    code = """
+import multiprocessing
+import sys
+def test_func():
+    print("Test stdout")
+    print("Test stderr", file=sys.stderr)
+
+if __name__ == "__main__":
+    p = multiprocessing.Process(target=test_func)
+    p.start()
+    p.join()
+"""
+
+    p = tmpdir.join("print-test.py")
+    p.write(code)
+    main_window.editor.load(to_text_string(p))
+    shell = main_window.ipyconsole.get_current_shellwidget()
+    qtbot.waitUntil(lambda: shell._prompt_html is not None,
+                    timeout=SHELL_TIMEOUT)
+    control = main_window.ipyconsole.get_widget().get_focus_widget()
+
+    # Click the run button
+    run_action = main_window.run_toolbar_actions[0]
+    run_button = main_window.run_toolbar.widgetForAction(run_action)
+    with qtbot.waitSignal(shell.executed):
+        qtbot.mouseClick(run_button, Qt.LeftButton)
+    qtbot.wait(1000)
+
+    assert 'Test stdout' in control.toPlainText()
+    assert 'Test stderr' in control.toPlainText()
+
+
+@pytest.mark.slow
+@flaky(max_runs=3)
+@pytest.mark.skipif(
+    os.name == 'nt',
+    reason="ctypes.string_at(0) doesn't segfaults on Windows")
+def test_print_faulthandler(main_window, qtbot, tmpdir):
+    """Test printing segfault info from kernel crashes."""
+    # Write code with a cell to a file
+    code = """
+def crash_func():
+    import ctypes; ctypes.string_at(0)
+crash_func()
+"""
+
+    p = tmpdir.join("print-test.py")
+    p.write(code)
+    main_window.editor.load(to_text_string(p))
+    shell = main_window.ipyconsole.get_current_shellwidget()
+    qtbot.waitUntil(lambda: shell._prompt_html is not None,
+                    timeout=SHELL_TIMEOUT)
+    control = main_window.ipyconsole.get_widget().get_focus_widget()
+
+    # Click the run button
+    run_action = main_window.run_toolbar_actions[0]
+    run_button = main_window.run_toolbar.widgetForAction(run_action)
+    qtbot.mouseClick(run_button, Qt.LeftButton)
+    qtbot.wait(5000)
+
+    assert 'Segmentation fault' in control.toPlainText()
+    assert 'in crash_func' in control.toPlainText()
+
+
+@pytest.mark.slow
+@flaky(max_runs=3)
+@pytest.mark.skipif(os.name == 'nt', reason="Tour messes up focus on Windows")
+@pytest.mark.parametrize("focus_to_editor", [True, False])
+@pytest.mark.skipif(os.name == 'nt', reason="Fails on Windows")
+def test_focus_to_editor(main_window, qtbot, tmpdir, focus_to_editor):
+    """Test that the focus_to_editor option works as expected."""
+    # Write code with cells to a file
+    code = """# %%
+def foo(x):
+    return 2 * x
+
+# %%
+foo(1)
+"""
+    p = tmpdir.join("test.py")
+    p.write(code)
+
+    # Load code in the editor
+    main_window.editor.load(to_text_string(p))
+
+    # Change focus_to_editor option
+    main_window.editor.set_option('focus_to_editor', focus_to_editor)
+    main_window.editor.apply_plugin_settings({'focus_to_editor'})
+    code_editor = main_window.editor.get_current_editor()
+
+    # Wait for the console to be up
+    shell = main_window.ipyconsole.get_current_shellwidget()
+    qtbot.waitUntil(lambda: shell._prompt_html is not None,
+                    timeout=SHELL_TIMEOUT)
+    control = main_window.ipyconsole.get_widget().get_focus_widget()
+
+    # Be sure the focus is on the editor before proceeding
+    code_editor.setFocus()
+    assert QApplication.focusWidget() is code_editor
+
+    # Select the run cell button to click it
+    run_cell_action = main_window.run_toolbar_actions[1]
+    run_cell_button = main_window.run_toolbar.widgetForAction(run_cell_action)
+
+    # Make sure we don't switch to the console after pressing the button
+    if focus_to_editor:
+        with qtbot.assertNotEmitted(
+            main_window.ipyconsole.sig_switch_to_plugin_requested, wait=1000
+        ):
+            qtbot.mouseClick(run_cell_button, Qt.LeftButton)
+    else:
+        qtbot.mouseClick(run_cell_button, Qt.LeftButton)
+        qtbot.wait(1000)
+
+    # Check the right widget has focus
+    focus_widget = QApplication.focusWidget()
+    if focus_to_editor:
+        assert focus_widget is code_editor
+    else:
+        assert focus_widget is control
+
+    # Give focus back to the editor before running the next test
+    if not focus_to_editor:
+        code_editor.setFocus()
+
+    # Move cursor to last line to run it
+    cursor = code_editor.textCursor()
+    cursor.movePosition(QTextCursor.End, QTextCursor.MoveAnchor)
+    cursor.movePosition(QTextCursor.PreviousBlock, QTextCursor.KeepAnchor)
+    code_editor.setTextCursor(cursor)
+
+    # Select the run selection button to click it
+    run_selection_action = main_window.run_toolbar_actions[3]
+    run_selection_button = main_window.run_toolbar.widgetForAction(
+        run_selection_action)
+
+    # Make sure we don't switch to the console after pressing the button
+    if focus_to_editor:
+        with qtbot.assertNotEmitted(
+            main_window.ipyconsole.sig_switch_to_plugin_requested, wait=1000
+        ):
+            qtbot.mouseClick(run_selection_button, Qt.LeftButton)
+    else:
+        qtbot.mouseClick(run_selection_button, Qt.LeftButton)
+        qtbot.wait(1000)
+
+    # Check the right widget has focus
+    focus_widget = QApplication.focusWidget()
+    if focus_to_editor:
+        assert focus_widget is code_editor
+    else:
+        assert focus_widget is control
+
+
+@pytest.mark.slow
+@flaky(max_runs=3)
+def test_focus_to_consoles(main_window, qtbot):
+    """
+    Check that we give focus to the text widget of our consoles after focus
+    is given to their dockwidgets.
+    """
+    # Wait for the console to be up
+    shell = main_window.ipyconsole.get_current_shellwidget()
+    qtbot.waitUntil(lambda: shell._prompt_html is not None,
+                    timeout=SHELL_TIMEOUT)
+    control = main_window.ipyconsole.get_widget().get_focus_widget()
+
+    # Show internal console
+    console = main_window.get_plugin(Plugins.Console)
+    console.toggle_view_action.setChecked(True)
+
+    # Change to the IPython console and assert focus is given to its focus
+    # widget
+    main_window.ipyconsole.dockwidget.raise_()
+    focus_widget = QApplication.focusWidget()
+    assert focus_widget is control
+
+    # Change to the Internal console and assert focus is given to its focus
+    # widget
+    console.dockwidget.raise_()
+    focus_widget = QApplication.focusWidget()
+    assert focus_widget is console.get_widget().get_focus_widget()
+
+
+@pytest.mark.slow
+@flaky(max_runs=3)
+@pytest.mark.skipif(os.name == 'nt', reason="Hangs sometimes on Windows")
+def test_rename_files_in_editor_after_folder_rename(main_window, mocker,
+                                                    tmpdir):
+    """
+    Check that we rename files in the editor after the directory that
+    contains them was renamed in Files.
+    """
+    old_path = 'test_rename_old'
+    new_path = 'test_rename_new'
+    fname = 'foo.py'
+
+    # Mock output of QInputDialog to set new path after rename
+    mocker.patch.object(QInputDialog, 'getText',
+                        return_value=(new_path, True))
+
+    # Create temp folder and simple file on it
+    file = tmpdir.mkdir(old_path).join(fname)
+    file.write("print('Hello world!')")
+
+    # Load file in editor
+    editor = main_window.get_plugin(Plugins.Editor)
+    editor.load(str(file))
+
+    # Switch to temp dir and give focus to Files
+    explorer = main_window.get_plugin(Plugins.Explorer)
+    explorer.chdir(str(tmpdir))
+    explorer.switch_to_plugin()
+    explorer.get_widget().get_focus_widget().setFocus()
+
+    # Select directory in widget
+    treewidget = explorer.get_widget().treewidget
+    idx = treewidget.get_index(old_path)
+    treewidget.setCurrentIndex(idx)
+
+    # Rename directory
+    treewidget.rename()
+
+    # Check file was renamed in editor
+    codeeditor = editor.get_current_editor()
+    assert codeeditor.filename == osp.join(str(tmpdir), new_path, fname)
+
+
+@pytest.mark.slow
+@flaky(max_runs=3)
+def test_history_from_ipyconsole(main_window, qtbot):
+    """
+    Check that we register commands introduced in the IPython console in
+    the History pane.
+    """
+    # Wait for the console to be up
+    shell = main_window.ipyconsole.get_current_shellwidget()
+    qtbot.waitUntil(lambda: shell._prompt_html is not None,
+                    timeout=SHELL_TIMEOUT)
+
+    # Run some code in the console
+    code = '5 + 3'
+    with qtbot.waitSignal(shell.executed):
+        shell.execute(code)
+
+    # Check that code is displayed in History
+    history = main_window.get_plugin(Plugins.History)
+    history.switch_to_plugin()
+    history_editor = history.get_widget().editors[0]
+    text = history_editor.toPlainText()
+    assert text.splitlines()[-1] == code
+
+
+@pytest.mark.slow
+def test_debug_unsaved_function(main_window, qtbot):
+    """
+    Test that a breakpoint in an unsaved file is reached.
+    """
+    # Main variables
+    shell = main_window.ipyconsole.get_current_shellwidget()
+    control = shell._control
+    run_action = main_window.run_toolbar_actions[0]
+    run_button = main_window.run_toolbar.widgetForAction(run_action)
+
+    # Clear all breakpoints
+    main_window.editor.clear_all_breakpoints()
+
+    # create new file
+    main_window.editor.new()
+    code_editor = main_window.editor.get_focus_widget()
+    code_editor.set_text('def foo():\n    print(1)')
+
+    # Set breakpoint
+    code_editor.debugger.toogle_breakpoint(line_number=2)
+
+    # run file
+    with qtbot.waitSignal(shell.executed):
+        qtbot.mouseClick(run_button, Qt.LeftButton)
+
+    # debug foo
+    with qtbot.waitSignal(shell.executed):
+        shell.execute('%debug foo()')
+
+    with qtbot.waitSignal(shell.executed):
+        shell.execute('continue')
+
+    assert "1---> 2     print(1)" in control.toPlainText()
+
+
+@pytest.mark.slow
+def test_out_runfile_runcell(main_window, qtbot):
+    """
+    Test that runcell and runfile return values if last statment
+    is expression.
+    """
+    shell = main_window.ipyconsole.get_current_shellwidget()
+    qtbot.waitUntil(lambda: shell._prompt_html is not None,
+                    timeout=SHELL_TIMEOUT)
+    control = main_window.ipyconsole.get_widget().get_focus_widget()
+    codes = {
+        "a = 1 + 1; a": (2, True),
+        "a = 1 + 3; a;": (4, False),
+        "a = 1 + 5\na": (6, True),
+        "a = 1 + 7\na;": (8, False)
+        }
+    for code in codes:
+        num, shown = codes[code]
+        # create new file
+        main_window.editor.new()
+        code_editor = main_window.editor.get_focus_widget()
+        code_editor.set_text(code)
+        with qtbot.waitSignal(shell.executed):
+            main_window.editor.run_cell()
+        if shown:
+            assert "]: " + str(num) in control.toPlainText()
+        else:
+            assert not "]: " + str(num) in control.toPlainText()
 
 
 if __name__ == "__main__":

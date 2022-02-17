@@ -14,22 +14,22 @@ import os
 import sys
 
 # Third party imports
-import qdarkstyle
-from qtpy.QtCore import Qt, Slot
+from qtpy.QtCore import QByteArray, Qt, Slot
 from qtpy.QtGui import QCursor, QKeySequence
-from qtpy.QtWidgets import (QAction, QApplication, QDockWidget, QMainWindow,
-                            QMenu, QMessageBox, QShortcut, QToolButton)
+from qtpy.QtWidgets import (QApplication, QMainWindow, QMenu, QMessageBox,
+                            QShortcut, QToolButton)
 
 # Local imports
 from spyder.config.base import _
-from spyder.config.gui import get_color_scheme, get_font, is_dark_interface
+from spyder.config.gui import get_color_scheme, get_font
 from spyder.config.manager import CONF
 from spyder.config.user import NoDefault
-from spyder.py3compat import configparser, is_text_string
-from spyder.utils import icon_manager as ima
+from spyder.py3compat import configparser, is_text_string, qbytearray_to_str
+from spyder.utils.icon_manager import ima
 from spyder.utils.qthelpers import (
     add_actions, create_action, create_toolbutton, MENU_SEPARATOR,
     toggle_actions, set_menu_icons)
+from spyder.utils.stylesheet import APP_STYLESHEET
 from spyder.widgets.dock import SpyderDockWidget
 
 
@@ -58,15 +58,22 @@ class BasePluginMixin(object):
         """Register plugin configuration."""
         CONF.register_plugin(self)
 
-    def _set_option(self, option, value, section=None):
+    def _set_option(self, option, value, section=None,
+                    recursive_notification=True):
         """Set option in spyder.ini"""
         section = self.CONF_SECTION if section is None else section
-        CONF.set(section, str(option), value)
+        CONF.set(section, str(option), value,
+                 recursive_notification=recursive_notification)
 
     def _get_option(self, option, default=NoDefault, section=None):
         """Get option from spyder.ini."""
         section = self.CONF_SECTION if section is None else section
         return CONF.get(section, option, default)
+
+    def _remove_option(self, option, section=None):
+        """Remove option from spyder.ini."""
+        section = self.CONF_SECTION if section is None else section
+        CONF.remove_option(section, option)
 
     def _show_status_message(self, message, timeout=0):
         """Show message in main window's status bar."""
@@ -126,8 +133,7 @@ class PluginWindow(QMainWindow):
         self.plugin = plugin
 
         # Setting interface theme
-        if is_dark_interface():
-            self.setStyleSheet(qdarkstyle.load_stylesheet_from_environment())
+        self.setStyleSheet(str(APP_STYLESHEET))
 
     def closeEvent(self, event):
         """Reimplement Qt method."""
@@ -135,7 +141,15 @@ class PluginWindow(QMainWindow):
         self.plugin.dockwidget.setWidget(self.plugin)
         self.plugin.dockwidget.setVisible(True)
         self.plugin.switch_to_plugin()
+
+        # Save window geometry to restore it when undocking the plugin
+        # again.
+        geometry = self.saveGeometry()
+        self.plugin.set_option('window_geometry', qbytearray_to_str(geometry))
+
+        # Close window
         QMainWindow.closeEvent(self, event)
+
         # Qt might want to do something with this soon,
         # So it should not be deleted by python yet.
         # Fixes spyder-ide/spyder#10704
@@ -168,15 +182,6 @@ class BasePluginWidgetMixin(object):
         self.options_button = create_toolbutton(self, text=_('Options'),
                                                 icon=ima.icon('tooloptions'))
         self.options_button.setPopupMode(QToolButton.InstantPopup)
-
-        # Don't show menu arrow and remove padding
-        if is_dark_interface():
-            self.options_button.setStyleSheet(
-                ("QToolButton::menu-indicator{image: none;}\n"
-                 "QToolButton{padding: 3px;}"))
-        else:
-            self.options_button.setStyleSheet(
-                "QToolButton::menu-indicator{image: none;}")
 
         # Options menu
         self._options_menu = QMenu(self)
@@ -336,6 +341,11 @@ class BasePluginWidgetMixin(object):
     def _close_window(self):
         """Close QMainWindow instance that contains this plugin."""
         if self._undocked_window is not None:
+            # Save window geometry to restore it when undocking the plugin
+            # again.
+            geometry = self._undocked_window.saveGeometry()
+            self.set_option('window_geometry', qbytearray_to_str(geometry))
+
             self._undocked_window.close()
             self._undocked_window = None
 
@@ -352,10 +362,22 @@ class BasePluginWidgetMixin(object):
         icon = self.get_plugin_icon()
         if is_text_string(icon):
             icon = self.get_icon(icon)
+
         window.setWindowIcon(icon)
         window.setWindowTitle(self.get_plugin_title())
         window.setCentralWidget(self)
         window.resize(self.size())
+
+        # Restore window geometry
+        geometry = self.get_option('window_geometry', default='')
+        if geometry:
+            try:
+                window.restoreGeometry(
+                    QByteArray().fromHex(str(geometry).encode('utf-8'))
+                )
+            except Exception:
+                pass
+
         self.refresh_plugin()
         self.set_ancestor(window)
         self.dockwidget.setFloating(False)

@@ -25,14 +25,15 @@ import pytest
 
 
 # To run our slow tests only in our CIs
-CI = os.environ.get('CI', None) is not None
+CI = bool(os.environ.get('CI', None))
 RUN_SLOW = os.environ.get('RUN_SLOW', None) == 'true'
 
 
 def run_pytest(run_slow=False, extra_args=None):
     """Run pytest tests for Spyder."""
     # Be sure to ignore subrepos
-    pytest_args = ['-vv', '-rw', '--durations=10', '--ignore=./external-deps']
+    pytest_args = ['-vv', '-rw', '--durations=10', '--ignore=./external-deps',
+                   '-W ignore::UserWarning']
 
     if CI:
         # Exit on first failure and show coverage

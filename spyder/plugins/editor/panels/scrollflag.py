@@ -19,21 +19,23 @@ from qtpy.QtWidgets import (QStyle, QStyleOptionSlider, QApplication)
 
 # Local imports
 from spyder.api.panel import Panel
-from spyder.config.gui import is_dark_interface
-from spyder.plugins.completion.manager.api import DiagnosticSeverity
+from spyder.plugins.completion.api import DiagnosticSeverity
 
 
 REFRESH_RATE = 1000
 
+# Maximum number of flags to print in a file
+MAX_FLAGS = 1000
+
 
 class ScrollFlagArea(Panel):
     """Source code editor's scroll flag area"""
-    WIDTH = 24 if sys.platform == 'darwin' and is_dark_interface() else 12
+    WIDTH = 24 if sys.platform == 'darwin' else 12
     FLAGS_DX = 4
     FLAGS_DY = 2
 
-    def __init__(self, editor):
-        Panel.__init__(self, editor)
+    def __init__(self):
+        Panel.__init__(self)
         self.setAttribute(Qt.WA_OpaquePaintEvent)
         self.scrollable = True
         self.setMouseTracking(True)
@@ -43,6 +45,21 @@ class ScrollFlagArea(Panel):
         self._range_indicator_is_visible = False
         self._alt_key_is_down = False
 
+        self._slider_range_color = QColor(Qt.gray)
+        self._slider_range_color.setAlphaF(.85)
+        self._slider_range_brush = QColor(Qt.gray)
+        self._slider_range_brush.setAlphaF(.5)
+
+        self._update_list_timer = QTimer(self)
+        self._update_list_timer.setSingleShot(True)
+        self._update_list_timer.timeout.connect(self.update_flags)
+
+        # Dictionary with flag lists
+        self._dict_flag_list = {}
+
+    def on_install(self, editor):
+        """Manages install setup of the pane."""
+        super().on_install(editor)
         # Define permanent Qt colors that are needed for painting the flags
         # and the slider range.
         self._facecolors = {
@@ -55,11 +72,8 @@ class ScrollFlagArea(Panel):
             }
         self._edgecolors = {key: color.darker(120) for
                             key, color in self._facecolors.items()}
-        self._slider_range_color = QColor(Qt.gray)
-        self._slider_range_color.setAlphaF(.85)
-        self._slider_range_brush = QColor(Qt.gray)
-        self._slider_range_brush.setAlphaF(.5)
 
+        # Signals
         editor.sig_focus_changed.connect(self.update)
         editor.sig_key_pressed.connect(self.keyPressEvent)
         editor.sig_key_released.connect(self.keyReleaseEvent)
@@ -68,12 +82,6 @@ class ScrollFlagArea(Panel):
         editor.sig_leave_out.connect(self.update)
         editor.sig_flags_changed.connect(self.delayed_update_flags)
         editor.sig_theme_colors_changed.connect(self.update_flag_colors)
-
-        self._update_list_timer = QTimer(self)
-        self._update_list_timer.setSingleShot(True)
-        self._update_list_timer.timeout.connect(self.update_flags)
-        # Dictionary with flag lists
-        self._dict_flag_list = {}
 
     @property
     def slider(self):
@@ -141,7 +149,7 @@ class ScrollFlagArea(Panel):
                     flag_type = None
 
                 if flag_type is not None:
-                    self._dict_flag_list[flag_type].append(block.blockNumber())
+                    self._dict_flag_list[flag_type].append(block)
 
             block = block.next()
 
@@ -189,17 +197,12 @@ class ScrollFlagArea(Panel):
         last_y_pos = self.value_to_position(
             last_line + 0.5, scale_factor, offset) - self.FLAGS_DY / 2
 
-        def compute_flag_ypos(block):
-            line_number = block.firstLineNumber()
-            if editor.verticalScrollBar().maximum() == 0:
-                geometry = editor.blockBoundingGeometry(block)
-                pos = geometry.y() + geometry.height() / 2 + self.FLAGS_DY / 2
-            elif last_line != 0:
-                frac = line_number / last_line
-                pos = first_y_pos + frac * (last_y_pos - first_y_pos)
-            else:
-                pos = first_y_pos
-            return ceil(pos)
+        # Compute the height of a line and of a flag in lines.
+        line_height = last_y_pos - first_y_pos
+        if line_height > 0:
+            flag_height_lines = rect_h * last_line / line_height
+        else:
+            flag_height_lines = 0
 
         # All the lists of block numbers for flags
         dict_flag_lists = {
@@ -211,14 +214,42 @@ class ScrollFlagArea(Panel):
         for flag_type in dict_flag_lists:
             painter.setBrush(self._facecolors[flag_type])
             painter.setPen(self._edgecolors[flag_type])
-            for block_number in dict_flag_lists[flag_type]:
-                # Find the block
-                block = editor.document().findBlockByNumber(block_number)
-                if not block.isValid():
-                    continue
-                # paint if everything else is fine
-                rect_y = compute_flag_ypos(block)
-                painter.drawRect(rect_x, rect_y, rect_w, rect_h)
+            if editor.verticalScrollBar().maximum() == 0:
+                # No scroll
+                for block in dict_flag_lists[flag_type]:
+                    if not block.isValid():
+                        continue
+                    geometry = editor.blockBoundingGeometry(block)
+                    rect_y = ceil(
+                        geometry.y() +
+                        geometry.height() / 2 +
+                        rect_h / 2
+                    )
+                    painter.drawRect(rect_x, rect_y, rect_w, rect_h)
+            elif last_line == 0:
+                # Only one line
+                for block in dict_flag_lists[flag_type]:
+                    if not block.isValid():
+                        continue
+                    rect_y = ceil(first_y_pos)
+                    painter.drawRect(rect_x, rect_y, rect_w, rect_h)
+            else:
+                # Many lines
+                if len(dict_flag_lists[flag_type]) < MAX_FLAGS:
+                    # If the file is too long, do not freeze the editor
+                    next_line = 0
+                    for block in dict_flag_lists[flag_type]:
+                        if not block.isValid():
+                            continue
+                        block_line = block.firstLineNumber()
+                        # block_line = -1 if invalid
+                        if block_line < next_line:
+                            # Don't print flags on top of flags
+                            continue
+                        next_line = block_line + flag_height_lines / 2
+                        frac = block_line / last_line
+                        rect_y = ceil(first_y_pos + frac * line_height)
+                        painter.drawRect(rect_x, rect_y, rect_w, rect_h)
 
         # Paint the slider range
         if not self._unit_testing:

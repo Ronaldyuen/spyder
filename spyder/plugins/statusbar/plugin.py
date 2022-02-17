@@ -14,6 +14,8 @@ from qtpy.QtCore import Slot
 # Local imports
 from spyder.api.exceptions import SpyderAPIError
 from spyder.api.plugins import Plugins, SpyderPluginV2
+from spyder.api.plugin_registration.decorators import (
+    on_plugin_available, on_plugin_teardown)
 from spyder.api.translations import get_translation
 from spyder.api.widgets.status import StatusBarWidget
 from spyder.config.base import running_under_pytest
@@ -23,6 +25,11 @@ from spyder.plugins.statusbar.container import StatusBarContainer
 
 # Localization
 _ = get_translation('spyder')
+
+
+class StatusBarWidgetPosition:
+    Left = 0
+    Right = -1
 
 
 class StatusBar(SpyderPluginV2):
@@ -36,12 +43,17 @@ class StatusBar(SpyderPluginV2):
     CONF_WIDGET_CLASS = StatusBarConfigPage
 
     STATUS_WIDGETS = {}
-    """
-    Dictionary that holds all widgets added to the status bar.
-    """
+    EXTERNAL_RIGHT_WIDGETS = {}
+    EXTERNAL_LEFT_WIDGETS = {}
+    INTERNAL_WIDGETS = {}
+    INTERNAL_WIDGETS_IDS = {
+        'clock_status', 'cpu_status', 'memory_status', 'read_write_status',
+        'eol_status', 'encoding_status', 'cursor_position_status',
+        'vcs_status', 'interpreter_status', 'lsp_status', 'kite_status'}
 
     # ---- SpyderPluginV2 API
-    def get_name(self):
+    @staticmethod
+    def get_name():
         return _('Status bar')
 
     def get_icon(self):
@@ -50,14 +62,25 @@ class StatusBar(SpyderPluginV2):
     def get_description(self):
         return _('Provide Core user interface management')
 
-    def register(self):
+    def on_initialize(self):
+        # --- Status widgets
+        self.add_status_widget(self.mem_status, StatusBarWidgetPosition.Right)
+        self.add_status_widget(self.cpu_status, StatusBarWidgetPosition.Right)
+        self.add_status_widget(
+            self.clock_status, StatusBarWidgetPosition.Right)
+
+    def on_close(self, _unused):
+        self._statusbar.setVisible(False)
+
+    @on_plugin_available(plugin=Plugins.Preferences)
+    def on_preferences_available(self):
         preferences = self.get_plugin(Plugins.Preferences)
         preferences.register_plugin_preferences(self)
 
-        # --- Status widgets
-        self.add_status_widget(self.mem_status, -1)
-        self.add_status_widget(self.cpu_status, -1)
-        self.add_status_widget(self.clock_status, -1)
+    @on_plugin_teardown(plugin=Plugins.Preferences)
+    def on_preferences_teardown(self):
+        preferences = self.get_plugin(Plugins.Preferences)
+        preferences.deregister_plugin_preferences(self)
 
     def after_container_creation(self):
         container = self.get_container()
@@ -66,7 +89,7 @@ class StatusBar(SpyderPluginV2):
         )
 
     # ---- Public API
-    def add_status_widget(self, widget, index=0):
+    def add_status_widget(self, widget, position=StatusBarWidgetPosition.Left):
         """
         Add status widget to main application status bar.
 
@@ -74,10 +97,9 @@ class StatusBar(SpyderPluginV2):
         ----------
         widget: StatusBarWidget
             Widget to be added to the status bar.
-        index: int
-            Position where the widget will be added among those already
-            present. This is counted from left to right in increasing
-            order and starting from 0.
+        position: int
+            Position where the widget will be added given the members of the
+            StatusBarWidgetPosition enum.
         """
         # Check widget class
         if not isinstance(widget, StatusBarWidget):
@@ -95,13 +117,22 @@ class StatusBar(SpyderPluginV2):
         # Check it was not added before
         if id_ in self.STATUS_WIDGETS and not running_under_pytest():
             raise SpyderAPIError(f'Status widget `{id_}` already added!')
-        self.STATUS_WIDGETS[id_] = widget
 
+        if id_ in self.INTERNAL_WIDGETS_IDS:
+            self.INTERNAL_WIDGETS[id_] = widget
+        elif position == StatusBarWidgetPosition.Right:
+            self.EXTERNAL_RIGHT_WIDGETS[id_] = widget
+        else:
+            self.EXTERNAL_LEFT_WIDGETS[id_] = widget
+
+        self.STATUS_WIDGETS[id_] = widget
         self._statusbar.setStyleSheet('QStatusBar::item {border: None;}')
-        if index == -1:
+
+        if position == StatusBarWidgetPosition.Right:
             self._statusbar.addPermanentWidget(widget)
         else:
-            self._statusbar.insertPermanentWidget(index, widget)
+            self._statusbar.insertPermanentWidget(
+                StatusBarWidgetPosition.Left, widget)
         self._statusbar.layout().setContentsMargins(0, 0, 0, 0)
         self._statusbar.layout().setSpacing(0)
 
@@ -176,3 +207,41 @@ class StatusBar(SpyderPluginV2):
     def _statusbar(self):
         """Reference to main window status bar."""
         return self._main.statusBar()
+
+    def _organize_status_widgets(self):
+        """
+        Organize the status bar widgets once the application is loaded.
+        """
+        # Desired organization
+        internal_layout = [
+            'clock_status', 'cpu_status', 'memory_status', 'read_write_status',
+            'eol_status', 'encoding_status', 'cursor_position_status',
+            'vcs_status', 'interpreter_status', 'lsp_status', 'kite_status']
+        external_left = list(self.EXTERNAL_LEFT_WIDGETS.keys())
+
+        # Remove all widgets from the statusbar, except the external right
+        for id_ in self.INTERNAL_WIDGETS:
+            self._statusbar.removeWidget(self.INTERNAL_WIDGETS[id_])
+
+        for id_ in self.EXTERNAL_LEFT_WIDGETS:
+            self._statusbar.removeWidget(self.EXTERNAL_LEFT_WIDGETS[id_])
+
+        # Add the internal widgets in the desired layout
+        for id_ in internal_layout:
+            # This is needed in the case kite is installed but not enabled
+            if id_ in self.INTERNAL_WIDGETS:
+                self._statusbar.insertPermanentWidget(
+                    StatusBarWidgetPosition.Left, self.INTERNAL_WIDGETS[id_])
+                self.INTERNAL_WIDGETS[id_].setVisible(True)
+
+        # Add the external left widgets
+        for id_ in external_left:
+            self._statusbar.insertPermanentWidget(
+                StatusBarWidgetPosition.Left, self.EXTERNAL_LEFT_WIDGETS[id_])
+            self.EXTERNAL_LEFT_WIDGETS[id_].setVisible(True)
+
+    def before_mainwindow_visible(self):
+        """Perform actions before the mainwindow is visible"""
+        # Organize widgets in the expected order
+        self._statusbar.setVisible(False)
+        self._organize_status_widgets()

@@ -10,7 +10,6 @@ from __future__ import print_function
 
 # Standard library imports
 from ast import literal_eval
-from distutils.version import LooseVersion
 from getpass import getuser
 from textwrap import dedent
 import glob
@@ -27,16 +26,16 @@ import time
 
 # Third party imports
 import pkg_resources
+from pkg_resources import parse_version
 import psutil
 
 # Local imports
 from spyder.config.base import (is_stable_version, running_under_pytest,
-                                get_home_dir)
+                                get_home_dir, running_in_mac_app)
 from spyder.config.utils import is_anaconda
 from spyder.py3compat import PY2, is_text_string, to_text_string
 from spyder.utils import encoding
 from spyder.utils.misc import get_python_executable
-
 
 HERE = osp.abspath(osp.dirname(__file__))
 
@@ -56,6 +55,11 @@ def get_temp_dir(suffix=None):
     else:
         username = encoding.to_unicode_from_fs(getuser())
         to_join.append('spyder-' + username)
+
+    tempdir = osp.join(*to_join)
+
+    if not osp.isdir(tempdir):
+        os.mkdir(tempdir)
 
     if suffix is not None:
         to_join.append(suffix)
@@ -507,7 +511,7 @@ def _get_mac_applications():
 def get_application_icon(fpath):
     """Return application icon or default icon if not found."""
     from qtpy.QtGui import QIcon
-    from spyder.utils import icon_manager as ima
+    from spyder.utils.icon_manager import ima
 
     if os.path.isfile(fpath) or os.path.isdir(fpath):
         icon = ima.icon('no_match')
@@ -794,12 +798,14 @@ def run_python_script_in_terminal(fname, wdir, args, interact,
                                         delete=False)
         if wdir:
             f.write('cd {}\n'.format(wdir))
+        if running_in_mac_app(executable):
+            f.write(f'export PYTHONHOME={os.environ["PYTHONPATH"]}\n')
         f.write(' '.join(p_args))
         f.close()
         os.chmod(f.name, 0o777)
 
         def run_terminal_thread():
-            proc = run_shell_command('open -a Terminal.app ' + f.name)
+            proc = run_shell_command('open -a Terminal.app ' + f.name, env={})
             # Prevent race condition
             time.sleep(3)
             proc.wait()
@@ -827,26 +833,17 @@ def check_version(actver, version, cmp_op):
     if isinstance(actver, tuple):
         actver = '.'.join([str(i) for i in actver])
 
-    # Hacks needed so that LooseVersion understands that (for example)
-    # version = '3.0.0' is in fact bigger than actver = '3.0.0rc1'
-    if is_stable_version(version) and not is_stable_version(actver) and \
-      actver.startswith(version) and version != actver:
-        version = version + 'zz'
-    elif is_stable_version(actver) and not is_stable_version(version) and \
-      version.startswith(actver) and version != actver:
-        actver = actver + 'zz'
-
     try:
         if cmp_op == '>':
-            return LooseVersion(actver) > LooseVersion(version)
+            return parse_version(actver) > parse_version(version)
         elif cmp_op == '>=':
-            return LooseVersion(actver) >= LooseVersion(version)
+            return parse_version(actver) >= parse_version(version)
         elif cmp_op == '=':
-            return LooseVersion(actver) == LooseVersion(version)
+            return parse_version(actver) == parse_version(version)
         elif cmp_op == '<':
-            return LooseVersion(actver) < LooseVersion(version)
+            return parse_version(actver) < parse_version(version)
         elif cmp_op == '<=':
-            return LooseVersion(actver) <= LooseVersion(version)
+            return parse_version(actver) <= parse_version(version)
         else:
             return False
     except TypeError:
@@ -874,7 +871,8 @@ def get_package_version(package_name):
         return None
 
 
-def is_module_installed(module_name, version=None, interpreter=None):
+def is_module_installed(module_name, version=None, interpreter=None,
+                        distribution_name=None):
     """
     Return True if module ``module_name`` is installed
 
@@ -888,6 +886,9 @@ def is_module_installed(module_name, version=None, interpreter=None):
     If ``interpreter`` is not None, checks if a module is installed with a
     given ``version`` in the ``interpreter``'s environment. Otherwise checks
     in Spyder's environment.
+
+    ``distribution_name`` is the distribution name of a package. For instance,
+    for pylsp_black that name is python_lsp_black.
     """
     if interpreter is not None:
         if is_python_interpreter(interpreter):
@@ -932,6 +933,12 @@ def is_module_installed(module_name, version=None, interpreter=None):
                 return False
         except Exception:
             pass
+
+        # Try to get the module version from its distribution name. For
+        # instance, pylsp_black doesn't have a version but that can be
+        # obtained from its distribution, called python_lsp_black.
+        if not module_version and distribution_name:
+            module_version = get_package_version(distribution_name)
 
     if version is None:
         return True

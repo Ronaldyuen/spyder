@@ -12,6 +12,7 @@ in Spyder, both internal and external.
 """
 
 # Standard library imports
+import os
 import logging
 from typing import Union
 from packaging.version import Version
@@ -19,13 +20,20 @@ from pkg_resources import parse_version
 
 # Third-party imports
 from qtpy.QtGui import QIcon
+from qtpy.QtCore import Slot
+from qtpy.QtWidgets import QMessageBox
 
 # Local imports
-from spyder.api.plugins import SpyderPluginV2, SpyderPlugin
+from spyder.api.plugins import Plugins, SpyderPluginV2, SpyderPlugin
+from spyder.api.plugin_registration.decorators import (
+    on_plugin_available, on_plugin_teardown)
 from spyder.config.base import _
 from spyder.config.main import CONF_VERSION
 from spyder.config.user import NoDefault
-from spyder.plugins.preferences.widgets.container import PreferencesContainer
+from spyder.plugins.mainmenu.api import ApplicationMenus, ToolsMenuSections
+from spyder.plugins.preferences.widgets.container import (
+    PreferencesActions, PreferencesContainer)
+from spyder.plugins.toolbar.api import ApplicationToolbars, MainToolbarSections
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +53,11 @@ class Preferences(SpyderPluginV2):
 
     NAME = 'preferences'
     CONF_SECTION = 'preferences'
+    REQUIRES = [Plugins.Application]
+    OPTIONAL = [Plugins.MainMenu, Plugins.Toolbar]
     CONF_FILE = False
     CONTAINER_CLASS = PreferencesContainer
+    CAN_BE_DISABLED = False
 
     NEW_API = 'new'
     OLD_API = 'old'
@@ -95,14 +106,31 @@ class Preferences(SpyderPluginV2):
             self.config_pages[plugin.CONF_SECTION] = (
                 self.OLD_API, Widget, plugin)
 
+    def deregister_plugin_preferences(
+            self, plugin: Union[SpyderPluginV2, SpyderPlugin]):
+        """Remove a plugin preference page and additional configuration tabs."""
+        name = (getattr(plugin, 'NAME', None) or
+                    getattr(plugin, 'CONF_SECTION', None))
+
+        # Remove configuration page for the plugin
+        self.config_pages.pop(name)
+
+        # Remove additional configuration tabs that the plugin did introduce
+        if isinstance(plugin, SpyderPluginV2):
+            for plugin_name in (plugin.ADDITIONAL_CONF_TABS or []):
+                tabs = plugin.ADDITIONAL_CONF_TABS[plugin_name]
+                for tab in tabs:
+                    self.config_tabs[plugin_name].remove(tab)
+
     def check_version_and_merge(self, conf_section: str, conf_key: str,
                                 new_value: BasicType,
                                 current_version: Version, plugin):
         """Add a versioned additional option to a configuration section."""
-        current_value = self.get_conf_option(conf_key, section=conf_section)
-        section_additional = self.get_conf_option('additional_configuration',
-                                                  section=conf_section,
-                                                  default={})
+        current_value = self.get_conf(
+            conf_key, section=conf_section, default=None)
+        section_additional = self.get_conf('additional_configuration',
+                                           section=conf_section,
+                                           default={})
         plugin_additional = section_additional.get(plugin.NAME, {})
 
         if conf_key in plugin_additional:
@@ -119,7 +147,7 @@ class Preferences(SpyderPluginV2):
             if current_value != NoDefault:
                 new_value = self.merge_configurations(current_value, new_value)
 
-            self.set_conf_option(
+            self.set_conf(
                 conf_key, new_value, section=conf_section)
 
             conf_key_info['version'] = str(current_version)
@@ -127,7 +155,7 @@ class Preferences(SpyderPluginV2):
             plugin_additional[conf_key] = conf_key_info
             section_additional[plugin.NAME] = plugin_additional
 
-            self.set_conf_option(
+            self.set_conf(
                 'additional_configuration', section_additional,
                 section=conf_section)
         else:
@@ -137,14 +165,14 @@ class Preferences(SpyderPluginV2):
             }
             section_additional[plugin.NAME] = plugin_additional
 
-            self.set_conf_option(
+            self.set_conf(
                 'additional_configuration', section_additional,
                 section=conf_section)
 
             if current_value != NoDefault:
                 new_value = self.merge_configurations(current_value, new_value)
 
-            self.set_conf_option(
+            self.set_conf(
                 conf_key, new_value, section=conf_section)
 
 
@@ -215,6 +243,9 @@ class Preferences(SpyderPluginV2):
         elif current_type in iterable_types and new_type in base_types:
             # Add a value to a list or tuple
             return current_type((list(current_value) + [new_value]))
+        elif current_value is None:
+            # Assigns the new value if it doesn't exist
+            return new_value
         else:
             logger.warning(f'The value {current_value} cannot be replaced'
                            f'by {new_value}')
@@ -227,7 +258,8 @@ class Preferences(SpyderPluginV2):
             self.get_main())
 
     # ---------------- Public Spyder API required methods ---------------------
-    def get_name(self) -> str:
+    @staticmethod
+    def get_name() -> str:
         return _('Preferences')
 
     def get_description(self) -> str:
@@ -236,14 +268,84 @@ class Preferences(SpyderPluginV2):
     def get_icon(self) -> QIcon:
         return self.create_icon('configure')
 
-    def register(self):
+    def on_initialize(self):
         container = self.get_container()
         main = self.get_main()
-        container.sig_reset_spyder.connect(main.reset_spyder)
 
-    def unregister(self):
-        pass
+        container.sig_show_preferences_requested.connect(
+            lambda: self.open_dialog(main.prefs_dialog_size))
 
-    def on_close(self, cancelable=False) -> bool:
+    @on_plugin_available(plugin=Plugins.MainMenu)
+    def on_main_menu_available(self):
+        container = self.get_container()
+        main_menu = self.get_plugin(Plugins.MainMenu)
+
+        main_menu.add_item_to_application_menu(
+            container.show_action,
+            menu_id=ApplicationMenus.Tools,
+            section=ToolsMenuSections.Tools,
+        )
+
+        main_menu.add_item_to_application_menu(
+            container.reset_action,
+            menu_id=ApplicationMenus.Tools,
+            section=ToolsMenuSections.Extras,
+        )
+
+    @on_plugin_available(plugin=Plugins.Toolbar)
+    def on_toolbar_available(self):
+        container = self.get_container()
+        toolbar = self.get_plugin(Plugins.Toolbar)
+        toolbar.add_item_to_application_toolbar(
+            container.show_action,
+            toolbar_id=ApplicationToolbars.Main,
+            section=MainToolbarSections.ApplicationSection
+        )
+
+    @on_plugin_available(plugin=Plugins.Application)
+    def on_application_available(self):
+        container = self.get_container()
+        container.sig_reset_preferences_requested.connect(self.reset)
+
+
+    @on_plugin_teardown(plugin=Plugins.MainMenu)
+    def on_main_menu_teardown(self):
+        main_menu = self.get_plugin(Plugins.MainMenu)
+
+        main_menu.remove_item_from_application_menu(
+            PreferencesActions.Show,
+            menu_id=ApplicationMenus.Tools,
+        )
+
+        main_menu.remove_item_from_application_menu(
+            PreferencesActions.Reset,
+            menu_id=ApplicationMenus.Tools,
+        )
+
+    @on_plugin_teardown(plugin=Plugins.Toolbar)
+    def on_toolbar_teardown(self):
+        toolbar = self.get_plugin(Plugins.Toolbar)
+        toolbar.remove_item_from_application_toolbar(
+            PreferencesActions.Show,
+            toolbar_id=ApplicationToolbars.Main
+        )
+
+    @on_plugin_teardown(plugin=Plugins.Application)
+    def on_application_teardown(self):
+        container = self.get_container()
+        container.sig_reset_preferences_requested.disconnect(self.reset)
+
+    @Slot()
+    def reset(self):
+        answer = QMessageBox.warning(self.main, _("Warning"),
+             _("Spyder will restart and reset to default settings: <br><br>"
+               "Do you want to continue?"),
+             QMessageBox.Yes | QMessageBox.No)
+        if answer == QMessageBox.Yes:
+            os.environ['SPYDER_RESET'] = 'True'
+            application = self.get_plugin(Plugins.Application)
+            application.sig_restart_requested.emit()
+
+    def can_close(self) -> bool:
         container = self.get_container()
         return not container.is_dialog_open()

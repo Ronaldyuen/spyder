@@ -21,12 +21,9 @@ from qtpy.QtWidgets import QApplication, QLabel, QVBoxLayout
 
 # Local imports
 from spyder.api.translations import get_translation
-from spyder.api.widgets import PluginMainWidget
-from spyder.plugins.onlinehelp.pydoc_patch import (CustomHTMLDoc,
-                                                   _start_server,
-                                                   _url_handler)
-from spyder.utils.misc import select_port
-from spyder.widgets.browser import WebView, WebViewActions
+from spyder.api.widgets.main_widget import PluginMainWidget
+from spyder.plugins.onlinehelp.pydoc_patch import _start_server, _url_handler
+from spyder.widgets.browser import FrameWebView, WebViewActions
 from spyder.widgets.comboboxes import UrlComboBox
 from spyder.widgets.findreplace import FindReplace
 
@@ -48,6 +45,11 @@ class PydocBrowserActions:
 
 class PydocBrowserMainToolbarSections:
     Main = 'main_section'
+
+
+class PydocBrowserToolbarItems:
+    PackageLabel = 'package_label'
+    UrlCombo = 'url_combo'
 
 
 # =============================================================================
@@ -126,11 +128,6 @@ class PydocServer(QThread):
 class PydocBrowser(PluginMainWidget):
     """PyDoc browser widget."""
 
-    DEFAULT_OPTIONS = {
-        'handle_links': False,
-        'max_history_entries': 10,
-        'zoom_factor': 1,
-    }
     ENABLE_SPINNER = True
 
     # --- Signals
@@ -140,9 +137,8 @@ class PydocBrowser(PluginMainWidget):
     This signal is emitted to indicate the help page has finished loading.
     """
 
-    def __init__(self, name=None, plugin=None, parent=None,
-                 options=DEFAULT_OPTIONS):
-        super().__init__(name, plugin, parent=parent, options=options)
+    def __init__(self, name=None, plugin=None, parent=None):
+        super().__init__(name, plugin, parent=parent)
 
         self._is_running = False
         self.home_url = None
@@ -150,28 +146,32 @@ class PydocBrowser(PluginMainWidget):
 
         # Widgets
         self.label = QLabel(_("Package:"))
-        self.url_combo = UrlComboBox(self)
-        self.webview = WebView(self,
-                               handle_links=self.get_option('handle_links'))
+        self.label.ID = PydocBrowserToolbarItems.PackageLabel
+
+        self.url_combo = UrlComboBox(
+            self, id_=PydocBrowserToolbarItems.UrlCombo)
+
+        self.webview = FrameWebView(
+            self,
+            handle_links=self.get_conf('handle_links')
+        )
         self.find_widget = FindReplace(self)
 
         # Setup
         self.find_widget.set_editor(self.webview)
         self.find_widget.hide()
-        self.url_combo.setMaxCount(self.get_option('max_history_entries'))
+        self.url_combo.setMaxCount(self.get_conf('max_history_entries'))
         tip = _('Write a package name here, e.g. pandas')
         self.url_combo.lineEdit().setPlaceholderText(tip)
         self.url_combo.lineEdit().setToolTip(tip)
         self.webview.setup()
-        self.webview.set_zoom_factor(self.get_option('zoom_factor'))
+        self.webview.set_zoom_factor(self.get_conf('zoom_factor'))
 
         # Layout
-        spacing = 10
         layout = QVBoxLayout()
         layout.addWidget(self.webview)
-        layout.addSpacing(spacing)
+        layout.addSpacing(1)
         layout.addWidget(self.find_widget)
-        layout.addSpacing(int(spacing / 2))
         self.setLayout(layout)
 
         # Signals
@@ -194,7 +194,7 @@ class PydocBrowser(PluginMainWidget):
         self.url_combo.lineEdit().selectAll()
         return self.url_combo
 
-    def setup(self, options={}):
+    def setup(self):
         # Actions
         home_action = self.create_action(
             PydocBrowserActions.Home,
@@ -247,9 +247,6 @@ class PydocBrowser(PluginMainWidget):
 
         refresh_action.setVisible(not self._is_running)
         stop_action.setVisible(self._is_running)
-
-    def on_option_update(self, option, value):
-        pass
 
     # --- Private API
     # ------------------------------------------------------------------------
@@ -491,12 +488,14 @@ class PydocBrowser(PluginMainWidget):
 def test():
     """Run web browser."""
     from spyder.utils.qthelpers import qapplication
+    from unittest.mock import MagicMock
 
+    plugin_mock = MagicMock()
+    plugin_mock.CONF_SECTION = 'onlinehelp'
     app = qapplication(test_time=8)
-    options = PydocBrowser.DEFAULT_OPTIONS.copy()
-    widget = PydocBrowser(None)
-    widget._setup(options)
-    widget.setup(options)
+    widget = PydocBrowser(None, plugin=plugin_mock)
+    widget._setup()
+    widget.setup()
     widget.show()
     sys.exit(app.exec_())
 

@@ -20,24 +20,25 @@ import os.path as osp
 import re
 import sys
 import time
-from enum import Enum
 from itertools import islice
 
 # Third party imports
+from qtpy import PYQT5
 from qtpy.compat import getopenfilename, getsavefilename
 from qtpy.QtCore import QByteArray, QProcess, QProcessEnvironment, Qt, Signal
 from qtpy.QtGui import QColor
-from qtpy.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMessageBox,
-                            QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+from qtpy.QtWidgets import (QApplication, QLabel, QMessageBox, QTreeWidget,
+                            QTreeWidgetItem, QVBoxLayout)
 
 # Local imports
 from spyder.api.translations import get_translation
-from spyder.api.widgets import PluginMainWidget, SpyderWidgetMixin
+from spyder.api.widgets.main_widget import PluginMainWidget
+from spyder.api.widgets.mixins import SpyderWidgetMixin
 from spyder.config.base import get_conf_path
-from spyder.config.gui import is_dark_interface
 from spyder.plugins.variableexplorer.widgets.texteditor import TextEditor
 from spyder.py3compat import to_text_string
 from spyder.utils.misc import add_pathlist_to_PYTHONPATH, getcwd_or_home
+from spyder.utils.palette import SpyderPalette, QStylePalette
 from spyder.utils.programs import shell_split
 from spyder.utils.qthelpers import get_item_user_text, set_item_user_text
 from spyder.widgets.comboboxes import PythonModulesComboBox
@@ -51,11 +52,7 @@ logger = logging.getLogger(__name__)
 
 # --- Constants
 # ----------------------------------------------------------------------------
-if is_dark_interface():
-    MAIN_TEXT_COLOR = 'white'
-else:
-    MAIN_TEXT_COLOR = '#444444'
-
+MAIN_TEXT_COLOR = QStylePalette.COLOR_TEXT_1
 
 class ProfilerWidgetActions:
     # Triggers
@@ -80,6 +77,15 @@ class ProfilerWidgetMainToolbarSections:
 class ProfilerWidgetInformationToolbarSections:
     Main = 'main_section'
 
+
+class ProfilerWidgetMainToolbarItems:
+    FileCombo = 'file_combo'
+
+
+class ProfilerWidgetInformationToolbarItems:
+    Stretcher1 = 'stretcher_1'
+    Stretcher2 = 'stretcher_2'
+    DateLabel = 'date_label'
 
 # --- Utils
 # ----------------------------------------------------------------------------
@@ -122,9 +128,6 @@ class ProfilerWidget(PluginMainWidget):
     """
     Profiler widget.
     """
-    DEFAULT_OPTIONS = {
-        'text_color': MAIN_TEXT_COLOR,
-    }
     ENABLE_SPINNER = True
     DATAPATH = get_conf_path('profiler.results')
 
@@ -162,9 +165,9 @@ class ProfilerWidget(PluginMainWidget):
     sig_finished = Signal()
     """This signal is emitted to inform the profile profiling has finished."""
 
-    def __init__(self, name=None, plugin=None, parent=None,
-                 options=DEFAULT_OPTIONS):
-        super().__init__(name, plugin, parent, options)
+    def __init__(self, name=None, plugin=None, parent=None):
+        super().__init__(name, plugin, parent)
+        self.set_conf('text_color', MAIN_TEXT_COLOR)
 
         # Attributes
         self._last_wdir = None
@@ -173,13 +176,15 @@ class ProfilerWidget(PluginMainWidget):
         self.error_output = None
         self.output = None
         self.running = False
-        self.text_color = self.get_option('text_color')
+        self.text_color = self.get_conf('text_color')
 
         # Widgets
         self.process = None
-        self.filecombo = PythonModulesComboBox(self)
+        self.filecombo = PythonModulesComboBox(
+            self, id_=ProfilerWidgetMainToolbarItems.FileCombo)
         self.datatree = ProfilerDataTree(self)
         self.datelabel = QLabel()
+        self.datelabel.ID = ProfilerWidgetInformationToolbarItems.DateLabel
 
         # Layout
         layout = QVBoxLayout()
@@ -198,7 +203,7 @@ class ProfilerWidget(PluginMainWidget):
     def get_focus_widget(self):
         return self.datatree
 
-    def setup(self, options):
+    def setup(self):
         self.start_action = self.create_action(
             ProfilerWidgetActions.Run,
             text=_("Run profiler"),
@@ -216,7 +221,6 @@ class ProfilerWidget(PluginMainWidget):
         self.log_action = self.create_action(
             ProfilerWidgetActions.ShowOutput,
             text=_("Output"),
-            icon_text=_("Output"),
             tip=_("Show program's output"),
             icon=self.create_icon('log'),
             triggered=self.show_log,
@@ -238,7 +242,6 @@ class ProfilerWidget(PluginMainWidget):
         self.save_action = self.create_action(
             ProfilerWidgetActions.SaveData,
             text=_("Save data"),
-            icon_text=_("Save data"),
             tip=_('Save profiling data'),
             icon=self.create_icon('filesave'),
             triggered=self.save_data,
@@ -246,7 +249,6 @@ class ProfilerWidget(PluginMainWidget):
         self.load_action = self.create_action(
             ProfilerWidgetActions.LoadData,
             text=_("Load data"),
-            icon_text=_("Load data"),
             tip=_('Load profiling data for comparison'),
             icon=self.create_icon('fileimport'),
             triggered=self.compare,
@@ -254,7 +256,6 @@ class ProfilerWidget(PluginMainWidget):
         self.clear_action = self.create_action(
             ProfilerWidgetActions.Clear,
             text=_("Clear comparison"),
-            icon_text=_("Clear comparison"),
             tip=_("Clear comparison"),
             icon=self.create_icon('editdelete'),
             triggered=self.clear,
@@ -269,14 +270,17 @@ class ProfilerWidget(PluginMainWidget):
                 toolbar=toolbar,
                 section=ProfilerWidgetMainToolbarSections.Main,
             )
-        toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
         # Secondary Toolbar
         secondary_toolbar = self.create_toolbar(
             ProfilerWidgetToolbars.Information)
         for item in [self.collapse_action, self.expand_action,
-                     self.create_stretcher(), self.datelabel,
-                     self.create_stretcher(), self.log_action,
+                     self.create_stretcher(
+                         id_=ProfilerWidgetInformationToolbarItems.Stretcher1),
+                     self.datelabel,
+                     self.create_stretcher(
+                         id_=ProfilerWidgetInformationToolbarItems.Stretcher2),
+                     self.log_action,
                      self.save_action, self.load_action, self.clear_action]:
             self.add_item_to_toolbar(
                 item,
@@ -300,18 +304,11 @@ class ProfilerWidget(PluginMainWidget):
     def update_actions(self):
         if self.running:
             icon = self.create_icon('stop')
-            text = _('Stop')
         else:
             icon = self.create_icon('run')
-            text = _('Start')
-
         self.start_action.setIcon(icon)
-        self.start_action.setIconText(text)
 
         self.start_action.setEnabled(bool(self.filecombo.currentText()))
-
-    def on_option_update(self, option, value):
-        pass
 
     # --- Private API
     # ------------------------------------------------------------------------
@@ -667,7 +664,12 @@ class ProfilerDataTree(QTreeWidget, SpyderWidgetMixin):
     sig_edit_goto_requested = Signal(str, int, str)
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        if PYQT5:
+            super().__init__(parent, class_parent=parent)
+        else:
+            QTreeWidget.__init__(self, parent)
+            SpyderWidgetMixin.__init__(self, class_parent=parent)
+
         self.header_list = [_('Function/Module'), _('Total Time'), _('Diff'),
                             _('Local Time'), _('Diff'), _('Calls'), _('Diff'),
                             _('File:line')]
@@ -848,7 +850,9 @@ class ProfilerDataTree(QTreeWidget, SpyderWidgetMixin):
         if len(x) == 2 and self.compare_file is not None:
             difference = x[0] - x[1]
             if difference:
-                color, sign = ('green', '-') if difference < 0 else ('red', '+')
+                color, sign = ((SpyderPalette.COLOR_SUCCESS_1, '-')
+                               if difference < 0
+                               else (SpyderPalette.COLOR_ERROR_1, '+'))
                 diff_str = '{}{}'.format(sign, self.format_measure(difference))
         return [self.format_measure(x[0]), [diff_str, color]]
 
@@ -1019,6 +1023,7 @@ def test():
     from spyder.utils.qthelpers import qapplication
     import inspect
     import tempfile
+    from unittest.mock import MagicMock
 
     primes_sc = inspect.getsource(primes)
     fd, script = tempfile.mkstemp(suffix='.py')
@@ -1027,11 +1032,13 @@ def test():
         f.write(primes_sc + "\n\n")
         f.write("primes(100000)")
 
+    plugin_mock = MagicMock()
+    plugin_mock.CONF_SECTION = 'profiler'
+
     app = qapplication(test_time=5)
-    options = ProfilerWidget.DEFAULT_OPTIONS.copy()
-    widget = ProfilerWidget('test')
-    widget._setup(options)
-    widget.setup(options)
+    widget = ProfilerWidget('test', plugin=plugin_mock)
+    widget._setup()
+    widget.setup()
     widget.resize(800, 600)
     widget.show()
     widget.analyze(script)

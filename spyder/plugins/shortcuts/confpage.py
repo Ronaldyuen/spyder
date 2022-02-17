@@ -19,7 +19,7 @@ from spyder.api.preferences import PluginConfigPage
 from spyder.api.translations import get_translation
 from spyder.plugins.shortcuts.widgets.table import (ShortcutFinder,
                                                     ShortcutsTable)
-from spyder.utils import icon_manager as ima
+from spyder.utils.icon_manager import ima
 
 # Localization
 _ = get_translation('spyder')
@@ -63,7 +63,8 @@ class ShortcutsConfigPage(PluginConfigPage):
 
         # Signals
         self.table.proxy_model.dataChanged.connect(
-            lambda i1, i2, roles, opt='': self.has_been_modified(opt))
+            lambda i1, i2, roles, opt='', sect='': self.has_been_modified(
+                sect, opt))
         self.reset_btn.clicked.connect(self.reset_to_default)
 
     def check_settings(self):

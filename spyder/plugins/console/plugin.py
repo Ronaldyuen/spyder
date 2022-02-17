@@ -10,19 +10,20 @@ Internal Console Plugin.
 
 # Standard library imports
 import logging
-import os
 
 # Third party imports
-from qtpy.QtCore import QObject, Signal, Slot
+from qtpy.QtCore import Signal, Slot
 from qtpy.QtGui import QIcon
 
 # Local imports
 from spyder.api.plugins import Plugins, SpyderDockablePlugin
+from spyder.api.plugin_registration.decorators import (
+    on_plugin_available, on_plugin_teardown)
 from spyder.api.translations import get_translation
-from spyder.plugins.application.plugin import ApplicationActions
-from spyder.plugins.console.widgets.main_widget import ConsoleWidget
-from spyder.plugins.mainmenu.api import (
-    ApplicationMenus, FileMenuSections, HelpMenuSections)
+from spyder.config.base import DEV
+from spyder.plugins.console.widgets.main_widget import (
+    ConsoleWidget, ConsoleWidgetActions)
+from spyder.plugins.mainmenu.api import ApplicationMenus, FileMenuSections
 
 # Localization
 _ = get_translation('spyder')
@@ -40,10 +41,9 @@ class Console(SpyderDockablePlugin):
     OPTIONAL = [Plugins.MainMenu]
     CONF_SECTION = NAME
     CONF_FILE = False
-    CONF_FROM_OPTIONS = {
-        'color_theme': ('appearance', 'selected'),
-    }
     TABIFY = [Plugins.IPythonConsole, Plugins.History]
+    CAN_BE_DISABLED = False
+    RAISE_AND_FOCUS = True
 
     # --- Signals
     # ------------------------------------------------------------------------
@@ -79,7 +79,8 @@ class Console(SpyderDockablePlugin):
 
     # --- SpyderDockablePlugin API
     # ------------------------------------------------------------------------
-    def get_name(self):
+    @staticmethod
+    def get_name():
         return _('Internal console')
 
     def get_icon(self):
@@ -88,9 +89,8 @@ class Console(SpyderDockablePlugin):
     def get_description(self):
         return _('Internal console running Spyder.')
 
-    def register(self):
+    def on_initialize(self):
         widget = self.get_widget()
-        mainmenu = self.get_plugin(Plugins.MainMenu)
 
         # Signals
         widget.sig_edit_goto_requested.connect(self.sig_edit_goto_requested)
@@ -100,7 +100,7 @@ class Console(SpyderDockablePlugin):
         widget.sig_help_requested.connect(self.sig_help_requested)
 
         # Crash handling
-        previous_crash = self.get_conf_option(
+        previous_crash = self.get_conf(
             'previous_crash',
             default='',
             section='main',
@@ -117,12 +117,23 @@ class Console(SpyderDockablePlugin):
             )
             widget.handle_exception(error_data)
 
+    @on_plugin_available(plugin=Plugins.MainMenu)
+    def on_main_menu_available(self):
+        widget = self.get_widget()
+        mainmenu = self.get_plugin(Plugins.MainMenu)
+
         # Actions
-        if mainmenu:
-            mainmenu.add_item_to_application_menu(
-                widget.quit_action,
-                menu_id=ApplicationMenus.File,
-                section=FileMenuSections.Restart)
+        mainmenu.add_item_to_application_menu(
+            widget.quit_action,
+            menu_id=ApplicationMenus.File,
+            section=FileMenuSections.Restart)
+
+    @on_plugin_teardown(plugin=Plugins.MainMenu)
+    def on_main_menu_teardown(self):
+        mainmenu = self.get_plugin(Plugins.MainMenu)
+        mainmenu.remove_item_from_application_menu(
+            ConsoleWidgetActions.Quit,
+            menu_id=ApplicationMenus.File)
 
     def update_font(self):
         font = self.get_font()
@@ -134,6 +145,12 @@ class Console(SpyderDockablePlugin):
 
     def on_mainwindow_visible(self):
         self.set_exit_function(self.main.closing)
+
+        # Hide this plugin when not in development so that people don't
+        # use it instead of the IPython console
+        if DEV is None:
+            self.toggle_view_action.setChecked(False)
+            self.dockwidget.hide()
 
     # --- API
     # ------------------------------------------------------------------------
@@ -176,7 +193,7 @@ class Console(SpyderDockablePlugin):
         return self.get_widget().get_sys_path()
 
     @Slot(dict)
-    def handle_exception(self, error_data):
+    def handle_exception(self, error_data, sender=None):
         """
         Handle any exception that occurs during Spyder usage.
 
@@ -204,10 +221,11 @@ class Console(SpyderDockablePlugin):
         The `label` and `steps` keys allow customizing the content of the
         error dialog.
         """
+        if sender is None:
+            sender = self.sender()
         self.get_widget().handle_exception(
             error_data,
-            sender=self.sender(),
-            internal_plugins=self._main._INTERNAL_PLUGINS,
+            sender=sender
         )
 
     def quit(self):
@@ -242,7 +260,7 @@ class Console(SpyderDockablePlugin):
         Stdin and stdout are now redirected through the internal console.
         """
         widget = self.get_widget()
-        widget.change_option('namespace', namespace)
+        widget.set_conf('namespace', namespace)
         widget.start_interpreter(namespace)
 
     def set_namespace_item(self, name, value):

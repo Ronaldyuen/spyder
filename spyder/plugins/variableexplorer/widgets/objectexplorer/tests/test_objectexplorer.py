@@ -19,8 +19,9 @@ import numpy as np
 import pytest
 
 # Local imports
+from spyder.config.manager import CONF
 from spyder.plugins.variableexplorer.widgets.objectexplorer import (
-        ObjectExplorer)
+    ObjectExplorer)
 from spyder.py3compat import PY2
 
 # =============================================================================
@@ -55,11 +56,9 @@ def test_objectexplorer(objectexplorer):
             raise AttributeError
 
     foobar = Foobar()
-    editor = objectexplorer(foobar,
-                            name='foobar',
-                            show_callable_attributes=False,
-                            show_special_attributes=False)
+
     # Editor was created
+    editor = objectexplorer(foobar, name='foobar')
     assert editor
 
     # Check header data and default hidden sections
@@ -107,22 +106,21 @@ def test_objectexplorer(objectexplorer):
 
 
 @pytest.mark.parametrize('params', [
-            # variable to show, rowCount for python 3 and 2
-            ('kjkj kj k j j kj k jkj', [71, 78]),
-            ([1, 3, 4, 'kjkj', None], [45, 46]),
-            ({1, 2, 1, 3, None, 'A', 'B', 'C', True, False}, [54, 55]),
-            (1.2233, [57, 58]),
-            (np.random.rand(10, 10), [166, 162]),
-            (datetime.date(1945, 5, 8), [43, 46])
-        ])
+    # variable to show, rowCount for different Python 3 versions
+    ('kjkj kj k j j kj k jkj', [71, 80]),
+    ([1, 3, 4, 'kjkj', None], [45, 47]),
+    ({1, 2, 1, 3, None, 'A', 'B', 'C', True, False}, [54, 56]),
+    (1.2233, [57, 59]),
+    (np.random.rand(10, 10), [166, 162]),
+    (datetime.date(1945, 5, 8), [43, 47])
+])
 def test_objectexplorer_collection_types(objectexplorer, params):
     """Test to validate proper handling of collection data types."""
     test, row_count = params
-    editor = objectexplorer(test,
-                            name='variable',
-                            show_callable_attributes=True,
-                            show_special_attributes=True)
+    CONF.set('variable_explorer', 'show_special_attributes', True)
+
     # Editor was created
+    editor = objectexplorer(test, name='variable')
     assert editor
 
     # Check number of rows and row content
@@ -159,11 +157,11 @@ def test_objectexplorer_types(objectexplorer, params):
     foo = Foobar()
 
     show_callable, show_special, row_count = params
-    editor = objectexplorer(foo,
-                            name='foo',
-                            show_callable_attributes=show_callable,
-                            show_special_attributes=show_special)
+    CONF.set('variable_explorer', 'show_callable_attributes', show_callable)
+    CONF.set('variable_explorer', 'show_special_attributes', show_special)
+
     # Editor was created
+    editor = objectexplorer(foo, name='foo')
     assert editor
 
     # Check number of rows and row content

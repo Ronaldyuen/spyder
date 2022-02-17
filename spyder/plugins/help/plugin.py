@@ -12,18 +12,18 @@ Help Plugin.
 import os
 
 # Third party imports
-from qtpy.QtCore import Qt, Signal
+from qtpy.QtCore import Signal
 
 # Local imports
-from spyder import __docs_url__, __forum_url__, __trouble_url__
+from spyder.api.exceptions import SpyderAPIError
 from spyder.api.plugins import Plugins, SpyderDockablePlugin
+from spyder.api.plugin_registration.decorators import (
+    on_plugin_available, on_plugin_teardown)
 from spyder.api.translations import get_translation
 from spyder.config.base import get_conf_path
 from spyder.config.fonts import DEFAULT_SMALL_DELTA
-from spyder.plugins.console.api import ConsoleActions
 from spyder.plugins.help.confpage import HelpConfigPage
 from spyder.plugins.help.widgets import HelpWidget
-from spyder.utils.qthelpers import start_file
 
 # Localization
 _ = get_translation('spyder')
@@ -31,14 +31,7 @@ _ = get_translation('spyder')
 
 class HelpActions:
     # Documentation related
-    SpyderDocumentationAction = "spyder documentation"
-    SpyderDocumentationVideoAction = "spyder_documentation_video_action"
     ShowSpyderTutorialAction = "spyder_tutorial_action"
-
-    # Support related
-    SpyderTroubleshootingAction = "spyder_troubleshooting_action"
-    SpyderSupportAction = "spyder_support_action"
-
 
 
 class Help(SpyderDockablePlugin):
@@ -56,10 +49,6 @@ class Help(SpyderDockablePlugin):
     LOG_PATH = get_conf_path(CONF_SECTION)
     FONT_SIZE_DELTA = DEFAULT_SMALL_DELTA
     DISABLE_ACTIONS_WHEN_HIDDEN = False
-    CONF_FROM_OPTIONS = {
-        'editor_shortcut': ('shortcuts', 'editor/inspect current object'),
-        'console_shortcut': ('shortcuts', 'console/inspect current object'),
-    }
 
     # Signals
     sig_focus_changed = Signal()  # TODO: What triggers this?
@@ -72,7 +61,8 @@ class Help(SpyderDockablePlugin):
 
     # --- SpyderDocakblePlugin API
     #  -----------------------------------------------------------------------
-    def get_name(self):
+    @staticmethod
+    def get_name():
         return _('Help')
 
     def get_description(self):
@@ -82,17 +72,8 @@ class Help(SpyderDockablePlugin):
     def get_icon(self):
         return self.create_icon('help')
 
-    def register(self):
+    def on_initialize(self):
         widget = self.get_widget()
-
-        # Plugins
-        internal_console = self.get_plugin(Plugins.Console)
-        editor = self.get_plugin(Plugins.Editor)
-        ipyconsole = self.get_plugin(Plugins.IPythonConsole)
-        shortcuts = self.get_plugin(Plugins.Shortcuts)
-        preferences = self.get_plugin(Plugins.Preferences)
-
-        preferences.register_plugin_preferences(self)
 
         # Expose widget signals on the plugin
         widget.sig_render_started.connect(self.sig_render_started)
@@ -100,27 +81,7 @@ class Help(SpyderDockablePlugin):
 
         # self.sig_focus_changed.connect(self.main.plugin_focus_changed)
         widget.set_history(self.load_history())
-        widget.set_internal_console(internal_console)
         widget.sig_item_found.connect(self.save_history)
-
-        editor.sig_help_requested.connect(self.set_editor_doc)
-        internal_console.sig_help_requested.connect(self.set_object_text)
-
-        if ipyconsole:
-            ipyconsole.sig_shellwidget_changed.connect(self.set_shellwidget)
-            ipyconsole.sig_shellwidget_process_started.connect(
-                self.set_shellwidget)
-            ipyconsole.sig_render_plain_text_requested.connect(
-                self.show_plain_text)
-            ipyconsole.sig_render_rich_text_requested.connect(
-                self.show_rich_text)
-
-            ipyconsole.sig_help_requested.connect(self.set_object_text)
-
-        if shortcuts:
-            # See: spyder-ide/spyder#6992
-            shortcuts.sig_shortcuts_updated.connect(
-                lambda: self.show_intro_message())
 
         self.tutorial_action = self.create_action(
             HelpActions.ShowSpyderTutorialAction,
@@ -129,8 +90,93 @@ class Help(SpyderDockablePlugin):
             register_shortcut=False,
         )
 
-        # Add actions to main menu (Help menu)
-        self._setup_menus()
+    @on_plugin_available(plugin=Plugins.Console)
+    def on_console_available(self):
+        widget = self.get_widget()
+        internal_console = self.get_plugin(Plugins.Console)
+        internal_console.sig_help_requested.connect(self.set_object_text)
+        widget.set_internal_console(internal_console)
+
+    @on_plugin_available(plugin=Plugins.Editor)
+    def on_editor_available(self):
+        editor = self.get_plugin(Plugins.Editor)
+        editor.sig_help_requested.connect(self.set_editor_doc)
+
+    @on_plugin_available(plugin=Plugins.IPythonConsole)
+    def on_ipython_console_available(self):
+        ipyconsole = self.get_plugin(Plugins.IPythonConsole)
+
+        ipyconsole.sig_shellwidget_changed.connect(self.set_shellwidget)
+        ipyconsole.sig_shellwidget_created.connect(self.set_shellwidget)
+        ipyconsole.sig_render_plain_text_requested.connect(
+            self.show_plain_text)
+        ipyconsole.sig_render_rich_text_requested.connect(
+            self.show_rich_text)
+
+        ipyconsole.sig_help_requested.connect(self.set_object_text)
+
+    @on_plugin_available(plugin=Plugins.Preferences)
+    def on_preferences_available(self):
+        preferences = self.get_plugin(Plugins.Preferences)
+        preferences.register_plugin_preferences(self)
+
+    @on_plugin_available(plugin=Plugins.Shortcuts)
+    def on_shortcuts_available(self):
+        shortcuts = self.get_plugin(Plugins.Shortcuts)
+
+        # See: spyder-ide/spyder#6992
+        shortcuts.sig_shortcuts_updated.connect(self.show_intro_message)
+
+        if self.is_plugin_available(Plugins.MainMenu):
+            self._setup_menus()
+
+    @on_plugin_available(plugin=Plugins.MainMenu)
+    def on_main_menu_available(self):
+        if self.is_plugin_enabled(Plugins.Shortcuts):
+            if self.is_plugin_available(Plugins.Shortcuts):
+                self._setup_menus()
+        else:
+            self._setup_menus()
+
+    @on_plugin_teardown(plugin=Plugins.Console)
+    def on_console_teardown(self):
+        widget = self.get_widget()
+        internal_console = self.get_plugin(Plugins.Console)
+        internal_console.sig_help_requested.disconnect(self.set_object_text)
+        widget.set_internal_console(None)
+
+    @on_plugin_teardown(plugin=Plugins.Editor)
+    def on_editor_teardown(self):
+        editor = self.get_plugin(Plugins.Editor)
+        editor.sig_help_requested.disconnect(self.set_editor_doc)
+
+    @on_plugin_teardown(plugin=Plugins.IPythonConsole)
+    def on_ipython_console_teardown(self):
+        ipyconsole = self.get_plugin(Plugins.IPythonConsole)
+
+        ipyconsole.sig_shellwidget_changed.disconnect(self.set_shellwidget)
+        ipyconsole.sig_shellwidget_created.disconnect(
+            self.set_shellwidget)
+        ipyconsole.sig_render_plain_text_requested.disconnect(
+            self.show_plain_text)
+        ipyconsole.sig_render_rich_text_requested.disconnect(
+            self.show_rich_text)
+
+        ipyconsole.sig_help_requested.disconnect(self.set_object_text)
+
+    @on_plugin_teardown(plugin=Plugins.Preferences)
+    def on_preferences_teardown(self):
+        preferences = self.get_plugin(Plugins.Preferences)
+        preferences.deregister_plugin_preferences(self)
+
+    @on_plugin_teardown(plugin=Plugins.Shortcuts)
+    def on_shortcuts_teardown(self):
+        shortcuts = self.get_plugin(Plugins.Shortcuts)
+        shortcuts.sig_shortcuts_updated.disconnect(self.show_intro_message)
+
+    @on_plugin_teardown(plugin=Plugins.MainMenu)
+    def on_main_menu_teardown(self):
+        self._remove_menus()
 
     def update_font(self):
         color_scheme = self.get_color_scheme()
@@ -146,20 +192,21 @@ class Help(SpyderDockablePlugin):
         self.save_history()
         return True
 
-    def apply_conf(self, options_set):
+    def apply_conf(self, options_set, notify=False):
         super().apply_conf(options_set)
-        widget = self.get_widget()
-
-        if 'color_scheme_name' in options_set:
-            widget.set_plain_text_color_scheme(self.get_color_scheme())
 
         # To make auto-connection changes take place instantly
-        editor = self.get_plugin(Plugins.Editor)
-        editor.apply_plugin_settings({'connect_to_oi'})
+        try:
+            editor = self.get_plugin(Plugins.Editor)
+            editor.apply_plugin_settings({'connect_to_oi'})
+        except SpyderAPIError:
+            pass
 
-        ipyconsole = self.get_plugin(Plugins.IPythonConsole)
-        if ipyconsole:
-            ipyconsole.apply_plugin_settings({'connect_to_oi'})
+    def on_mainwindow_visible(self):
+        # Raise plugin the first time Spyder starts
+        if self.get_conf('show_first_time', default=True):
+            self.dockwidget.raise_()
+            self.set_conf('show_first_time', False)
 
     # --- Private API
     # ------------------------------------------------------------------------
@@ -169,8 +216,7 @@ class Help(SpyderDockablePlugin):
         shortcuts_summary_action = None
         if shortcuts:
             from spyder.plugins.shortcuts.plugin import ShortcutActions
-            shortcuts_summary_action = shortcuts.get_action(
-                ShortcutActions.ShortcutSummaryAction)
+            shortcuts_summary_action = ShortcutActions.ShortcutSummaryAction
         if mainmenu:
             from spyder.plugins.mainmenu.api import (
                 ApplicationMenus, HelpMenuSections)
@@ -181,6 +227,13 @@ class Help(SpyderDockablePlugin):
                 section=HelpMenuSections.Documentation,
                 before=shortcuts_summary_action,
                 before_section=HelpMenuSections.Support)
+
+    def _remove_menus(self):
+        from spyder.plugins.mainmenu.api import ApplicationMenus
+        mainmenu = self.get_plugin(Plugins.MainMenu)
+        mainmenu.remove_item_from_application_menu(
+            HelpActions.ShowSpyderTutorialAction,
+            menu_id=ApplicationMenus.Help)
 
     # --- Public API
     # ------------------------------------------------------------------------
@@ -194,7 +247,7 @@ class Help(SpyderDockablePlugin):
             The shell widget that is going to be connected to Help.
         """
         shellwidget._control.set_help_enabled(
-            self.get_conf_option('connect/ipython_console'))
+            self.get_conf('connect/ipython_console'))
         self.get_widget().set_shell(shellwidget)
 
     def load_history(self, obj=None):
@@ -231,7 +284,6 @@ class Help(SpyderDockablePlugin):
 
     def show_intro_message(self):
         """Show the IPython introduction message."""
-        self.switch_to_plugin()
         self.get_widget().show_intro_message()
 
     def show_rich_text(self, text, collapse=False, img_path=''):

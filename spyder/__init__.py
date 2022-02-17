@@ -29,7 +29,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 """
 
-version_info = (5, 0, 0, "dev0")
+version_info = (6, 0, 0, "dev0")
 
 __version__ = '.'.join(map(str, version_info))
 __installer_version__ = __version__
@@ -38,7 +38,7 @@ __author__ = 'Spyder Project Contributors and others'
 __license__ = __doc__
 __project_url__ = 'https://github.com/spyder-ide/spyder'
 __forum_url__   = 'https://groups.google.com/group/spyderlib'
-__trouble_url__ = 'https://docs.spyder-ide.org/current/first-steps.html'
+__trouble_url__ = 'https://tinyurl.com/spyder-first-steps'
 __trouble_url_short__ = 'https://tinyurl.com/SpyderHelp'
 __website_url__ = 'https://www.spyder-ide.org/'
 __docs_url__ = 'https://docs.spyder-ide.org/'
@@ -92,7 +92,8 @@ def get_versions(reporev=True):
         'bitness': 64 if sys.maxsize > 2**32 else 32,
         'qt': qtpy.QtCore.__version__,
         'qt_api': qtpy.API_NAME,      # PyQt5
-        'qt_api_ver': qtpy.PYQT_VERSION,
+        'qt_api_ver': (qtpy.PYSIDE_VERSION if qtpy.API == "pyside2"
+                       else qtpy.PYQT_VERSION),
         'system': system,   # Linux, Windows, ...
         'release': platform.release(),  # XP, 10.6, 2.2.0, etc.
         'revision': revision,  # '9fdf926eccce',

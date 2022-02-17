@@ -16,10 +16,7 @@ from os import path
 import copy
 import datetime
 from xml.dom.minidom import parseString
-try:
-    from unittest.mock import Mock
-except ImportError:
-    from mock import Mock  # Python 2
+from unittest.mock import Mock
 
 # Third party imports
 import numpy
@@ -30,6 +27,7 @@ from qtpy.QtCore import Qt, QPoint
 from qtpy.QtWidgets import QWidget, QDateEdit
 
 # Local imports
+from spyder.config.manager import CONF
 from spyder.widgets.collectionseditor import (
     RemoteCollectionsEditorTableView, CollectionsEditorTableView,
     CollectionsModel, CollectionsEditor, LARGE_NROWS, ROWS_TO_LOAD, natsort)
@@ -230,8 +228,8 @@ def test_filter_rows(qtbot):
              'view': 'Column names: 0'}}
     )
     editor = RemoteCollectionsEditorTableView(None, data)
-    editor.finder = NamespacesBrowserFinder(editor,
-                                            editor.set_regex)
+    editor.finder = NamespacesBrowserFinder(
+        editor, editor.set_regex)
     qtbot.addWidget(editor)
 
     # Initially two rows
@@ -254,29 +252,16 @@ def test_filter_rows(qtbot):
     assert editor.model.rowCount() == 0
 
 
-def test_create_dataframeeditor_with_correct_format(qtbot, monkeypatch):
-    MockDataFrameEditor = Mock()
-    mockDataFrameEditor_instance = MockDataFrameEditor()
-    monkeypatch.setattr('spyder.plugins.variableexplorer.widgets.collectionsdelegate.DataFrameEditor',
-                        MockDataFrameEditor)
+def test_create_dataframeeditor_with_correct_format(qtbot):
     df = pandas.DataFrame(['foo', 'bar'])
     editor = CollectionsEditorTableView(None, {'df': df})
     qtbot.addWidget(editor)
-    editor.set_dataframe_format('%10d')
-    editor.delegate.createEditor(None, None, editor.model.index(0, 3))
-    mockDataFrameEditor_instance.dataModel.set_format.assert_called_once_with('%10d')
-
-def test_accept_sig_option_changed_from_dataframeeditor(qtbot, monkeypatch):
-    df = pandas.DataFrame(['foo', 'bar'])
-    editor = CollectionsEditorTableView(None, {'df': df})
-    qtbot.addWidget(editor)
-    editor.set_dataframe_format('%10d')
-    assert editor.source_model.dataframe_format == '%10d'
+    CONF.set('variable_explorer', 'dataframe_format', '10d')
     editor.delegate.createEditor(None, None, editor.model.index(0, 3))
     dataframe_editor = next(iter(editor.delegate._editors.values()))['editor']
     qtbot.addWidget(dataframe_editor)
-    dataframe_editor.sig_option_changed.emit('dataframe_format', '%5f')
-    assert editor.source_model.dataframe_format == '%5f'
+    dataframe_editor.dataModel._format == '%10d'
+
 
 def test_collectionsmodel_with_two_ints():
     coll = {'x': 1, 'y': 2}
@@ -301,6 +286,7 @@ def test_collectionsmodel_with_two_ints():
     assert data(cm, row_with_y, 2) == 1
     assert data(cm, row_with_y, 3) == '2'
 
+
 def test_collectionsmodel_with_index():
     # Regression test for spyder-ide/spyder#3380,
     # modified for spyder-ide/spyder#3758.
@@ -316,12 +302,13 @@ def test_collectionsmodel_with_index():
         assert data(cm, 0, 3) == rng.summary()
 
 
-def test_shows_dataframeeditor_when_editing_index(qtbot, monkeypatch):
-    for rng_name, rng in generate_pandas_indexes().items():
+def test_shows_dataframeeditor_when_editing_index(monkeypatch):
+    for __, rng in generate_pandas_indexes().items():
         MockDataFrameEditor = Mock()
         mockDataFrameEditor_instance = MockDataFrameEditor()
-        monkeypatch.setattr('spyder.plugins.variableexplorer.widgets.collectionsdelegate.DataFrameEditor',
-                            MockDataFrameEditor)
+        attr_to_patch_dfedit = ('spyder.plugins.variableexplorer.widgets.' +
+                                'dataframeeditor.DataFrameEditor')
+        monkeypatch.setattr(attr_to_patch_dfedit, MockDataFrameEditor)
         coll = {'rng': rng}
         editor = CollectionsEditorTableView(None, coll)
         editor.delegate.createEditor(None, None,
@@ -609,6 +596,7 @@ def test_view_module_in_coledit():
     editor.setup(os, "module_test", readonly=False)
     assert editor.widget.editor.readonly
 
+
 def test_notimplementederror_multiindex():
     """
     Test that the NotImplementedError when scrolling a MultiIndex is handled.
@@ -645,12 +633,12 @@ def test_editor_parent_set(monkeypatch):
 
     MockArrayEditor = Mock()
     attr_to_patch_arredit = ('spyder.plugins.variableexplorer.widgets.' +
-                             'collectionsdelegate.ArrayEditor')
+                             'arrayeditor.ArrayEditor')
     monkeypatch.setattr(attr_to_patch_arredit, MockArrayEditor)
 
     MockDataFrameEditor = Mock()
     attr_to_patch_dfedit = ('spyder.plugins.variableexplorer.widgets.' +
-                            'collectionsdelegate.DataFrameEditor')
+                            'dataframeeditor.DataFrameEditor')
     monkeypatch.setattr(attr_to_patch_dfedit, MockDataFrameEditor)
 
     MockTextEditor = Mock()
@@ -822,6 +810,7 @@ def test_collectionseditor_when_clicking_on_header_and_large_rows(qtbot):
     li = [1] * 10000
     editor = CollectionsEditor()
     editor.setup(li)
+    editor.show()
 
     # Perform the sorting. It should be done quite quickly because
     # there's a very small number of rows in display.
@@ -832,6 +821,8 @@ def test_collectionseditor_when_clicking_on_header_and_large_rows(qtbot):
 
     # Assert data was sorted correctly.
     assert data(view.model, 0, 0) == 9999
+
+    editor.accept()
 
 
 def test_dicts_with_mixed_types_as_key(qtbot):

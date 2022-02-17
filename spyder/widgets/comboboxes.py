@@ -18,7 +18,6 @@ import os
 import os.path as osp
 
 # Third party imports
-import qdarkstyle
 from qtpy.QtCore import QEvent, Qt, QTimer, QUrl, Signal, QSize
 from qtpy.QtGui import QFont
 from qtpy.QtWidgets import (QComboBox, QCompleter, QLineEdit,
@@ -26,8 +25,8 @@ from qtpy.QtWidgets import (QComboBox, QCompleter, QLineEdit,
 
 # Local imports
 from spyder.config.base import _
-from spyder.config.gui import is_dark_interface
 from spyder.py3compat import to_text_string
+from spyder.utils.stylesheet import APP_STYLESHEET
 from spyder.widgets.helperwidgets import IconLineEdit
 
 
@@ -60,6 +59,12 @@ class BaseComboBox(QComboBox):
 
         Filter tab keys and process double tab keys.
         """
+
+        # Type check: Prevent error in PySide where 'event' may be of type
+        # QtGui.QPainter (for whatever reason).
+        if not isinstance(event, QEvent):
+            return True
+
         if (event.type() == QEvent.KeyPress) and (event.key() == Qt.Key_Tab):
             self.sig_tab_pressed.emit(True)
             return True
@@ -145,7 +150,7 @@ class PatternComboBox(BaseComboBox):
     """Search pattern combo box"""
 
     def __init__(self, parent, items=None, tip=None,
-                 adjust_to_minimum=True):
+                 adjust_to_minimum=True, id_=None):
         BaseComboBox.__init__(self, parent)
         if hasattr(self.lineEdit(), 'setClearButtonEnabled'):  # only Qt >= 5.2
             self.lineEdit().setClearButtonEnabled(True)
@@ -156,6 +161,8 @@ class PatternComboBox(BaseComboBox):
             self.addItems(items)
         if tip is not None:
             self.setToolTip(tip)
+        if id_ is not None:
+            self.ID = id_
 
 
 class EditableComboBox(BaseComboBox):
@@ -205,7 +212,7 @@ class PathComboBox(EditableComboBox):
     """
     open_dir = Signal(str)
 
-    def __init__(self, parent, adjust_to_contents=False):
+    def __init__(self, parent, adjust_to_contents=False, id_=None):
         EditableComboBox.__init__(self, parent)
 
         # Replace the default lineedit by a custom one with icon display
@@ -225,6 +232,9 @@ class PathComboBox(EditableComboBox):
         self.highlighted.connect(self.add_tooltip_to_highlighted_item)
         self.sig_tab_pressed.connect(self.tab_complete)
         self.valid.connect(lineedit.update_status)
+
+        if id_ is not None:
+            self.ID = id_
 
     # --- Qt overrides
     def focusInEvent(self, event):
@@ -255,9 +265,8 @@ class PathComboBox(EditableComboBox):
         opts = sorted([opt for opt in opts if osp.isdir(opt)])
 
         completer = QCompleter(opts, self)
-        if is_dark_interface():
-            dark_qss = qdarkstyle.load_stylesheet_from_environment()
-            completer.popup().setStyleSheet(dark_qss)
+        qss = str(APP_STYLESHEET)
+        completer.popup().setStyleSheet(qss)
         self.setCompleter(completer)
 
         return opts
@@ -308,11 +317,14 @@ class UrlComboBox(PathComboBox):
     """
     QComboBox handling urls
     """
-    def __init__(self, parent, adjust_to_contents=False):
+    def __init__(self, parent, adjust_to_contents=False, id_=None):
         PathComboBox.__init__(self, parent, adjust_to_contents)
         line_edit = QLineEdit(self)
         self.setLineEdit(line_edit)
         self.editTextChanged.disconnect(self.validate)
+
+        if id_ is not None:
+            self.ID = id_
 
     def is_valid(self, qstr=None):
         """Return True if string is valid"""
@@ -370,9 +382,8 @@ class FileComboBox(PathComboBox):
                        if osp.isdir(opt) or osp.isfile(opt)])
 
         completer = QCompleter(opts, self)
-        if is_dark_interface():
-            dark_qss = qdarkstyle.load_stylesheet_from_environment()
-            completer.popup().setStyleSheet(dark_qss)
+        qss = str(APP_STYLESHEET)
+        completer.popup().setStyleSheet(qss)
         self.setCompleter(completer)
 
         return opts
@@ -390,8 +401,10 @@ class PythonModulesComboBox(PathComboBox):
     QComboBox handling Python modules or packages path
     (i.e. .py, .pyw files *and* directories containing __init__.py)
     """
-    def __init__(self, parent, adjust_to_contents=False):
+    def __init__(self, parent, adjust_to_contents=False, id_=None):
         PathComboBox.__init__(self, parent, adjust_to_contents)
+        if id_ is not None:
+            self.ID = id_
 
     def is_valid(self, qstr=None):
         """Return True if string is valid"""

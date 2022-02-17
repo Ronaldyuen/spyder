@@ -32,7 +32,7 @@ from spyder.plugins.editor.api.decoration import TextDecoration, DRAW_ORDERS
 from spyder.plugins.editor.utils.decoration import TextDecorationsManager
 from spyder.plugins.editor.widgets.completion import CompletionWidget
 from spyder.plugins.outlineexplorer.api import is_cell_header, document_cells
-
+from spyder.utils.palette import SpyderPalette
 
 class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
     """Text edit base widget"""
@@ -65,7 +65,6 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
         # Code snippets
         self.code_snippets = True
 
-        self.textChanged.connect(self.changed)
         self.cursorPositionChanged.connect(self.cursor_position_changed)
 
         self.indent_chars = " "*4
@@ -92,13 +91,15 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
 
         # The color values may be overridden by the syntax highlighter
         # Highlight current line color
-        self.currentline_color = QColor(Qt.red).lighter(190)
-        self.currentcell_color = QColor(Qt.red).lighter(194)
+        self.currentline_color = QColor(
+            SpyderPalette.COLOR_ERROR_2).lighter(190)
+        self.currentcell_color = QColor(
+            SpyderPalette.COLOR_ERROR_2).lighter(194)
 
         # Brace matching
         self.bracepos = None
-        self.matched_p_color = QColor(Qt.green)
-        self.unmatched_p_color = QColor(Qt.red)
+        self.matched_p_color = QColor(SpyderPalette.COLOR_SUCCESS_1)
+        self.unmatched_p_color = QColor(SpyderPalette.COLOR_ERROR_2)
 
         self.decorations = TextDecorationsManager(self)
 
@@ -108,8 +109,13 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
 
         def reset_current_cell():
             self.current_cell = None
+            self.highlight_current_cell()
 
         self.textChanged.connect(reset_current_cell)
+
+        # Cache
+        self._current_cell_cursor = None
+        self._current_line_block = None
 
     def setup_completion(self):
         size = CONF.get('main', 'completion/size')
@@ -212,10 +218,6 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
         self.extra_selections_dict[key] = []
         self.update()
 
-    def changed(self):
-        """Emit changed signal"""
-        self.modificationChanged.emit(self.document().isModified())
-
     def get_visible_block_numbers(self):
         """Get the first and last visible block numbers."""
         first = self.firstVisibleBlock().blockNumber()
@@ -244,7 +246,12 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
     # ------Highlight current line
     def highlight_current_line(self):
         """Highlight current line"""
-        selection = TextDecoration(self.textCursor())
+        cursor = self.textCursor()
+        block = cursor.block()
+        if self._current_line_block == block:
+            return
+        self._current_line_block = block
+        selection = TextDecoration(cursor)
         selection.format.setProperty(QTextFormat.FullWidthSelection,
                                      to_qvariant(True))
         selection.format.setBackground(self.currentline_color)
@@ -254,6 +261,7 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
 
     def unhighlight_current_line(self):
         """Unhighlight current line"""
+        self._current_line_block = None
         self.clear_extra_selections('current_line')
 
     # ------Highlight current cell
@@ -261,8 +269,22 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
         """Highlight current cell"""
         if (not self.has_cell_separators or
                 not self.highlight_current_cell_enabled):
+            self._current_cell_cursor = None
             return
         cursor, whole_file_selected = self.select_current_cell()
+
+        def same_selection(c1, c2):
+            if c1 is None or c2 is None:
+                return False
+            return (
+                c1.selectionStart() == c2.selectionStart() and
+                c1.selectionEnd() == c2.selectionEnd()
+            )
+
+        if same_selection(self._current_cell_cursor, cursor):
+            # Already correct
+            return
+        self._current_cell_cursor = cursor
         selection = TextDecoration(cursor)
         selection.format.setProperty(QTextFormat.FullWidthSelection,
                                      to_qvariant(True))
@@ -276,6 +298,7 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
 
     def unhighlight_current_cell(self):
         """Unhighlight current cell"""
+        self._current_cell_cursor = None
         self.clear_extra_selections('current_cell')
 
     def in_comment(self, cursor=None, position=None):
@@ -480,8 +503,7 @@ class TextEditBaseWidget(QPlainTextEdit, BaseEditMixin):
             text = self.get_text('sof', 'eof')
             return text.replace('\u2028', '\n').replace('\u2029', '\n')\
                        .replace('\u0085', '\n')
-        else:
-            return super(TextEditBaseWidget, self).toPlainText()
+        return super(TextEditBaseWidget, self).toPlainText()
 
     def keyPressEvent(self, event):
         key = event.key()

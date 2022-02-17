@@ -18,6 +18,8 @@ from qtpy.QtCore import Signal
 
 # Local imports
 from spyder.api.plugins import Plugins, SpyderDockablePlugin
+from spyder.api.plugin_registration.decorators import (
+    on_plugin_available, on_plugin_teardown)
 from spyder.api.translations import get_translation
 from spyder.plugins.breakpoints.widgets.main_widget import BreakpointWidget
 from spyder.plugins.mainmenu.api import ApplicationMenus
@@ -87,20 +89,39 @@ class Breakpoints(SpyderDockablePlugin):
 
     # --- SpyderDockablePlugin API
     # ------------------------------------------------------------------------
-    def get_name(self):
+    @staticmethod
+    def get_name():
         return _("Breakpoints")
 
     def get_description(self):
         return _("Manage code breakpoints in a unified pane.")
 
     def get_icon(self):
-        path = osp.join(self.get_path(), self.IMG_PATH)
-        return self.create_icon('breakpoints', path=path)
+        return self.create_icon('breakpoints')
 
-    def register(self):
+    def on_initialize(self):
+        widget = self.get_widget()
+
+        widget.sig_clear_all_breakpoints_requested.connect(
+            self.sig_clear_all_breakpoints_requested)
+        widget.sig_clear_breakpoint_requested.connect(
+            self.sig_clear_breakpoint_requested)
+        widget.sig_edit_goto_requested.connect(self.sig_edit_goto_requested)
+        widget.sig_conditional_breakpoint_requested.connect(
+            self.sig_conditional_breakpoint_requested)
+
+        self.create_action(
+            BreakpointsActions.ListBreakpoints,
+            _("List breakpoints"),
+            triggered=lambda: self.switch_to_plugin(),
+            icon=self.get_icon(),
+        )
+
+    @on_plugin_available(plugin=Plugins.Editor)
+    def on_editor_available(self):
         widget = self.get_widget()
         editor = self.get_plugin(Plugins.Editor)
-        mainmenu = self.get_plugin(Plugins.MainMenu)
+        list_action = self.get_action(BreakpointsActions.ListBreakpoints)
 
         # TODO: change name of this signal on editor
         editor.breakpoints_saved.connect(self.set_data)
@@ -111,27 +132,38 @@ class Breakpoints(SpyderDockablePlugin):
         widget.sig_conditional_breakpoint_requested.connect(
             editor.set_or_edit_conditional_breakpoint)
 
-        widget.sig_clear_all_breakpoints_requested.connect(
-            self.sig_clear_all_breakpoints_requested)
-        widget.sig_clear_breakpoint_requested.connect(
-            self.sig_clear_breakpoint_requested)
-        widget.sig_edit_goto_requested.connect(self.sig_edit_goto_requested)
-        widget.sig_conditional_breakpoint_requested.connect(
-            self.sig_conditional_breakpoint_requested)
-
-        list_action = self.create_action(
-            BreakpointsActions.ListBreakpoints,
-            _("List breakpoints"),
-            triggered=lambda: self.switch_to_plugin(),
-            icon=self.get_icon(),
-        )
-
-        if mainmenu:
-            debug_menu = mainmenu.get_application_menu(ApplicationMenus.Debug)
-            mainmenu.add_item_to_application_menu(list_action, debug_menu)
-
         # TODO: Fix location once the sections are defined
         editor.pythonfile_dependent_actions += [list_action]
+
+    @on_plugin_available(plugin=Plugins.MainMenu)
+    def on_main_menu_available(self):
+        mainmenu = self.get_plugin(Plugins.MainMenu)
+        list_action = self.get_action(BreakpointsActions.ListBreakpoints)
+        mainmenu.add_item_to_application_menu(
+            list_action, menu_id=ApplicationMenus.Debug)
+
+    @on_plugin_teardown(plugin=Plugins.Editor)
+    def on_editor_teardown(self):
+        widget = self.get_widget()
+        editor = self.get_plugin(Plugins.Editor)
+        list_action = self.get_action(BreakpointsActions.ListBreakpoints)
+
+        editor.breakpoints_saved.disconnect(self.set_data)
+        widget.sig_clear_all_breakpoints_requested.disconnect(
+            editor.clear_all_breakpoints)
+        widget.sig_clear_breakpoint_requested.disconnect(
+            editor.clear_breakpoint)
+        widget.sig_edit_goto_requested.disconnect(editor.load)
+        widget.sig_conditional_breakpoint_requested.disconnect(
+            editor.set_or_edit_conditional_breakpoint)
+
+        editor.pythonfile_dependent_actions.remove(list_action)
+
+    @on_plugin_teardown(plugin=Plugins.MainMenu)
+    def on_main_menu_teardown(self):
+        mainmenu = self.get_plugin(Plugins.MainMenu)
+        mainmenu.remove_item_from_application_menu(
+            BreakpointsActions.ListBreakpoints, menu_id=ApplicationMenus.Debug)
 
     # --- Private API
     # ------------------------------------------------------------------------
@@ -139,7 +171,7 @@ class Breakpoints(SpyderDockablePlugin):
         """
         Load breakpoint data from configuration file.
         """
-        breakpoints_dict = self.get_conf_option(
+        breakpoints_dict = self.get_conf(
             'breakpoints',
             default={},
             section='run',

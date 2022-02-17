@@ -16,10 +16,7 @@ from __future__ import division
 import os
 import sys
 from datetime import datetime
-try:
-    from unittest.mock import Mock, ANY
-except ImportError:
-    from mock import Mock, ANY  # Python 2
+from unittest.mock import Mock, ANY
 
 # Third party imports
 from pandas import (DataFrame, date_range, read_csv, concat, Index, RangeIndex,
@@ -364,16 +361,17 @@ def test_dataframemodel_with_format_percent_d_and_nan():
     assert data(dfm, 0, 0) == '0'
     assert data(dfm, 1, 0) == 'nan'
 
-def test_change_format_emits_signal(qtbot, monkeypatch):
+def test_change_format(qtbot, monkeypatch):
     mockQInputDialog = Mock()
     mockQInputDialog.getText = lambda parent, title, label, mode, text: ('%10.3e', True)
     monkeypatch.setattr('spyder.plugins.variableexplorer.widgets.dataframeeditor.QInputDialog', mockQInputDialog)
     df = DataFrame([[0]])
     editor = DataFrameEditor(None)
     editor.setup_and_check(df)
-    with qtbot.waitSignal(editor.sig_option_changed) as blocker:
-        editor.change_format()
-    assert blocker.args == ['dataframe_format', '%10.3e']
+    editor.change_format()
+    assert editor.dataModel._format == '%10.3e'
+    assert editor.get_conf('dataframe_format') == '10.3e'
+    editor.set_conf('dataframe_format', '.6g')
 
 def test_change_format_with_format_not_starting_with_percent(qtbot, monkeypatch):
     mockQInputDialog = Mock()
@@ -385,8 +383,7 @@ def test_change_format_with_format_not_starting_with_percent(qtbot, monkeypatch)
     df = DataFrame([[0]])
     editor = DataFrameEditor(None)
     editor.setup_and_check(df)
-    with qtbot.assertNotEmitted(editor.sig_option_changed):
-        editor.change_format()
+    editor.change_format()
 
 
 def test_dataframeeditor_with_various_indexes():

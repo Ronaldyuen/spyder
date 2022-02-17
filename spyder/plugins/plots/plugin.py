@@ -8,20 +8,17 @@
 Plots Plugin.
 """
 
-# Third party imports
-from qtpy.QtCore import Signal
-
 # Local imports
 from spyder.api.plugins import Plugins, SpyderDockablePlugin
+from spyder.api.shellconnect.mixins import ShellConnectMixin
 from spyder.api.translations import get_translation
 from spyder.plugins.plots.widgets.main_widget import PlotsWidget
-
 
 # Localization
 _ = get_translation('spyder')
 
 
-class Plots(SpyderDockablePlugin):
+class Plots(SpyderDockablePlugin, ShellConnectMixin):
     """
     Plots plugin.
     """
@@ -33,9 +30,10 @@ class Plots(SpyderDockablePlugin):
     CONF_FILE = False
     DISABLE_ACTIONS_WHEN_HIDDEN = False
 
-    # --- SpyderDockablePlugin API
+    # ---- SpyderDockablePlugin API
     # ------------------------------------------------------------------------
-    def get_name(self):
+    @staticmethod
+    def get_name():
         return _('Plots')
 
     def get_description(self):
@@ -44,38 +42,16 @@ class Plots(SpyderDockablePlugin):
     def get_icon(self):
         return self.create_icon('hist')
 
-    def register(self):
-        # Plugins
-        ipyconsole = self.get_plugin(Plugins.IPythonConsole)
+    def on_initialize(self):
+        # If a figure is loaded, raise the dockwidget the first time
+        # a plot is generated.
+        self.get_widget().sig_figure_loaded.connect(self._on_first_plot)
 
-        # Signals
-        ipyconsole.sig_shellwidget_changed.connect(self.set_shellwidget)
-        ipyconsole.sig_shellwidget_process_started.connect(
-            self.add_shellwidget)
-        ipyconsole.sig_shellwidget_process_finished.connect(
-            self.remove_shellwidget)
-
-        # If a figure is loaded raise the dockwidget but do not give focus
-        self.get_widget().sig_figure_loaded.connect(
-            lambda: self.switch_to_plugin(force_focus=False))
-
-    def unregister(self):
-        # Plugins
-        ipyconsole = self.get_plugin(Plugins.IPythonConsole)
-
-        # Signals
-        ipyconsole.sig_shellwidget_id_changed.disconnect(
-            self.set_shellwidget_from_id)
-        ipyconsole.sig_shellwidget_process_started.disconnect(
-            self.add_shellwidget)
-        ipyconsole.sig_shellwidget_id_process_finished.disconnect(
-            self.remove_shellwidget_from_id)
-
-    # --- Public API
+    # ---- Public API
     # ------------------------------------------------------------------------
     def current_widget(self):
         """
-        Return the current shellwidget.
+        Return the current widget displayed at the moment.
 
         Returns
         -------
@@ -84,39 +60,19 @@ class Plots(SpyderDockablePlugin):
         """
         return self.get_widget().current_widget()
 
-    def add_shellwidget(self, shellwidget):
-        """
-        Add a new shellwidget registered with the plots plugin.
 
-        This function registers a new FigureBrowser for browsing the figures
-        in the shellwidget.
+    # ---- Private API
+    # ------------------------------------------------------------------------
+    def _on_first_plot(self):
+        """Actions to execute after the first plot is generated."""
+        # Only switch when inline plotting is muted. This avoids
+        # showing the plugin when users want to only see plots in
+        # the IPython console.
+        # Fixes spyder-ide/spyder#15467
+        if self.get_conf('mute_inline_plotting'):
+            self.switch_to_plugin(force_focus=False)
 
-        Parameters
-        ----------
-        shellwidget: spyder.plugins.ipyconsole.widgets.shell.ShellWidget
-            The shell widget.
-        """
-        self.get_widget().add_shellwidget(shellwidget)
-
-    def remove_shellwidget(self, shellwidget):
-        """
-        Remove the shellwidget registered with the plots plugin.
-
-        Parameters
-        ----------
-        shellwidget: spyder.plugins.ipyconsole.widgets.shell.ShellWidget
-            The shell widget.
-        """
-
-        self.get_widget().remove_shellwidget(shellwidget)
-
-    def set_shellwidget(self, shellwidget):
-        """
-        Update the current shellwidget displayed with the plots plugin.
-
-        Parameters
-        ----------
-        shellwidget: spyder.plugins.ipyconsole.widgets.shell.ShellWidget
-            The shell widget.
-        """
-        self.get_widget().add_shellwidget(shellwidget)
+        # We only give raise to the plugin once per session, to let users
+        # know that plots are displayed in this plugin.
+        # Fixes spyder-ide/spyder#15705
+        self.get_widget().sig_figure_loaded.disconnect(self._on_first_plot)

@@ -14,12 +14,20 @@ from unittest.mock import Mock, MagicMock
 
 # Third party imports
 import pytest
-from qtpy.QtCore import Signal, QObject
-from qtpy.QtWidgets import QMainWindow
+from qtpy.QtCore import Signal
+from qtpy.QtWidgets import QApplication, QMainWindow
+
+# This is necessary to run these tests independently from the rest in our
+# test suite.
+# NOTE: Don't move it to another place; it needs to be before importing the
+# Pylint plugin below.
+# Fixes spyder-ide/spyder#17071
+if QApplication.instance() is None:
+    app = QApplication([])
 
 # Local imports
+from spyder.api.plugin_registration.registry import PLUGIN_REGISTRY
 from spyder.config.manager import CONF
-from spyder.plugins.pylint.main_widget import PylintWidget
 from spyder.plugins.pylint.plugin import Pylint
 from spyder.plugins.pylint.utils import get_pylintrc_path
 
@@ -52,33 +60,43 @@ bad-names={bad_names}
 good-names=e
 """
 
-
 class MainWindowMock(QMainWindow):
     sig_editor_focus_changed = Signal(str)
-    _PLUGINS = {}
 
     def __init__(self):
-        super(MainWindowMock, self).__init__(None)
+        super().__init__(None)
         self.editor = Mock()
         self.editor.sig_editor_focus_changed = self.sig_editor_focus_changed
         self.projects = MagicMock()
 
-        self._PLUGINS['editor'] = self.editor
-        self._PLUGINS['projects'] = self.projects
+        PLUGIN_REGISTRY.plugin_registry = {
+            'editor': self.editor,
+            'projects': self.projects
+        }
+
+    def get_plugin(self, plugin_name):
+        return PLUGIN_REGISTRY.get_plugin(plugin_name)
 
 
 @pytest.fixture
 def pylint_plugin(mocker, qtbot):
     main_window = MainWindowMock()
+    main_window.resize(640, 480)
     main_window.projects.get_active_project_path = mocker.MagicMock(
         return_value=None)
+    main_window.show()
+
     plugin = Pylint(parent=main_window, configuration=CONF)
     plugin._register()
-    plugin.set_conf_option("history_filenames", [])
+    plugin.set_conf("history_filenames", [])
+
     widget = plugin.get_widget()
+    widget.resize(640, 480)
     widget.filecombo.clear()
-    qtbot.addWidget(widget)
-    yield plugin
+    widget.show()
+
+    qtbot.addWidget(main_window)
+    return plugin
 
 
 @pytest.fixture
@@ -205,7 +223,7 @@ def test_pylint_widget_pylintrc(
                  return_value=search_paths[WORKING_DIR])
     mocker.patch("spyder.plugins.pylint.main_widget.osp.expanduser",
                  return_value=search_paths[HOME_DIR])
-    pylint_plugin.set_conf_option("project_dir", search_paths[PROJECT_DIR])
+    pylint_plugin.set_conf("project_dir", search_paths[PROJECT_DIR])
 
     pylint_widget = pylint_plugin.get_widget()
     pylint_plugin.start_code_analysis(filename=pylint_test_script)
@@ -236,8 +254,8 @@ def test_pylint_max_history_conf(pylint_plugin, pylint_test_scripts):
     # Change the max_entry to 2
     assert pylint_widget.filecombo.count() == 0
     pylint_plugin.change_history_depth(2)
-    assert pylint_plugin.get_conf_option('max_entries') == 2
-    assert pylint_widget.get_option('max_entries') == 2
+    assert pylint_plugin.get_conf('max_entries') == 2
+    assert pylint_widget.get_conf('max_entries') == 2
 
     # Call to set_filename
     pylint_widget.set_filename(filename=script_0)

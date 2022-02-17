@@ -13,6 +13,8 @@ $ python setup.py
 
 import os
 import sys
+import shutil
+import pkg_resources
 from logging import getLogger, StreamHandler, Formatter
 from setuptools import setup
 
@@ -32,6 +34,9 @@ ICONFILE = os.path.join(SPYREPO, 'img_src', 'spyder.icns')
 SPYLINK = os.path.join(THISDIR, 'spyder')
 
 sys.path.append(SPYREPO)
+
+from spyder import __version__ as SPYVER
+from spyder.config.base import MAC_APP_NAME
 
 # Python version
 PYVER = [sys.version_info.major, sys.version_info.minor,
@@ -68,7 +73,13 @@ def make_app_bundle(dist_dir, make_lite=False):
         File "<frozen zipimport>", line 177, in get_data
         KeyError: 'blib2to3/Users/rclary/Library/Caches/black/20.8b1/
         Grammar3.8.6.final.0.pickle'
-    ipython :
+    debugpy :
+        NotADirectoryError: [Errno 20] Not a directory:
+        '<path>/Resources/lib/python39.zip/debugpy/_vendored'
+    docutils :
+        [Errno 20] Not a directory: '<path>/Resources/lib/python39.zip/
+        docutils/writers/latex2e/docutils.sty'
+    IPython :
         [IPKernelApp] WARNING | Could not copy README_STARTUP to startup dir.
         Source file
         <path>/Resources/lib/python38.zip/IPython/core/profile/README_STARTUP
@@ -92,20 +103,26 @@ def make_app_bundle(dist_dir, make_lite=False):
     PIL :
         Library not loaded: @loader_path/.dylibs/libjpeg.9.dylib
         Note: only applicable to not-Lite build
+    pkg_resources:
+        ImportError: The 'more_itertools' package is required; normally this is
+        bundled with this package so if you get this warning, consult the
+        packager of your distribution.
     pygments :
         ModuleNotFoundError: No module named 'pygments.formatters.latex'
-    pyls :
-        <path>/Contents/MacOS/python: No module named pyls
+    pylint :
+        <path>/Contents/MacOS/python: No module named pylint.__main__
+    pylsp :
+        <path>/Contents/MacOS/python: No module named pylsp
         Note: still occurs in alias mode
-    pyls_black :
-        Mandatory: pyls_black >=0.4.6 : None (NOK)
+    pylsp_black :
+        Mandatory: python-pyls-black >=1.0.0 : None (NOK)
     pyls_spyder :
         Mandatory: pyls_spyder >=0.1.1 : None (NOK)
     qtawesome :
         NotADirectoryError: [Errno 20] Not a directory: '<path>/Resourses/lib/
         python38.zip/qtawesome/fonts/fontawesome4.7-webfont.ttf'
     setuptools :
-        Mandatory: setuptools >=39.0.0 : None (NOK)
+        Mandatory: setuptools >=49.6.0 : None (NOK)
     sphinx :
         No module named 'sphinx.builders.changes'
     spyder :
@@ -117,12 +134,7 @@ def make_app_bundle(dist_dir, make_lite=False):
         NotADirectoryError: [Errno 20] Not a directory: '<path>/Resources/lib/
         python39.zip/textdistance/libraries.json'
     """
-    import shutil
-    import pkg_resources
-
-    from spyder import __version__ as SPYVER
     from spyder.config.utils import EDIT_FILETYPES, _get_extensions
-    from spyder.config.base import MAC_APP_NAME
 
     # Patch py2app for IPython help()
     py2app_file = pkg_resources.pkgutil.get_loader('py2app').get_filename()
@@ -140,12 +152,20 @@ def make_app_bundle(dist_dir, make_lite=False):
     build_type = 'lite' if make_lite else 'full'
     logger.info('Creating %s app bundle...', build_type)
 
-    PACKAGES = ['alabaster', 'astroid', 'blib2to3', 'IPython', 'jedi',
-                'jinja2', 'keyring', 'parso', 'pygments', 'pyls', 'pyls_black',
-                'pyls_spyder', 'qtawesome', 'setuptools', 'sphinx', 'spyder',
-                'spyder_kernels', 'textdistance',
+    PACKAGES = ['alabaster', 'astroid', 'blib2to3', 'docutils', 'IPython',
+                'jedi', 'jinja2', 'keyring', 'parso', 'pygments', 'pylint',
+                'pylsp', 'pylsp_black', 'pyls_spyder', 'qtawesome',
+                'setuptools', 'sphinx', 'spyder', 'spyder_kernels',
+                'textdistance', 'debugpy', 'pkg_resources'
                 ]
-    INCLUDES = ['_sitebuiltins']  # required for IPython help()
+    INCLUDES = ['_sitebuiltins',  # required for IPython help()
+                'jellyfish',
+                # required for sphinx
+                'sphinxcontrib.applehelp', 'sphinxcontrib.devhelp',
+                'sphinxcontrib.htmlhelp', 'sphinxcontrib.jsmath',
+                'sphinxcontrib.qthelp', 'sphinxcontrib.serializinghtml',
+                'platformdirs.macos',  # required for platformdirs
+                ]
     EXCLUDES = []
     EXCLUDE_EGG = ['py2app']
 
@@ -163,8 +183,10 @@ def make_app_bundle(dist_dir, make_lite=False):
     EXCLUDE_EGG.extend(EXCLUDES)
     EDIT_EXT = [ext[1:] for ext in _get_extensions(EDIT_FILETYPES)]
 
-    FRAMEWORKS = ['/usr/local/lib/libspatialindex.dylib',
-                  '/usr/local/lib/libspatialindex_c.dylib']  # for rtree
+    # Get rtree dylibs
+    rtree_loc = pkg_resources.get_distribution('rtree').module_path
+    rtree_dylibs = os.scandir(os.path.join(rtree_loc, 'rtree', 'lib'))
+    FRAMEWORKS = [lib.path for lib in rtree_dylibs]
 
     OPTIONS = {
         'optimize': 0,
@@ -179,7 +201,8 @@ def make_app_bundle(dist_dir, make_lite=False):
                                        'CFBundleTypeName': 'Text File',
                                        'CFBundleTypeRole': 'Editor'}],
             'CFBundleIdentifier': 'org.spyder-ide',
-            'CFBundleShortVersionString': SPYVER
+            'CFBundleShortVersionString': SPYVER,
+            'NSRequiresAquaSystemAppearance': False  # Darkmode support
         }
     }
 
@@ -196,23 +219,57 @@ def make_app_bundle(dist_dir, make_lite=False):
         os.remove(app_script_path)
         os.remove(SPYLINK)
 
-    # Copy egg info from site-packages: fixes several pkg_resources issues
-    dest_dir = os.path.join(dist_dir, MAC_APP_NAME, 'Contents', 'Resources',
-                            'lib', f'python{PYVER[0]}.{PYVER[1]}')
-    for dist in pkg_resources.working_set:
-        if (dist.egg_info is None or dist.key.startswith('pyobjc')
-                or dist.key in EXCLUDE_EGG):
-            logger.info(f'Skipping egg {dist.key}')
-            continue
-        egg = os.path.basename(dist.egg_info)
-        dest = os.path.join(dest_dir, egg)
-        shutil.copytree(dist.egg_info, dest)
-        logger.info(f'Copied {egg}')
-
-    logger.info('App bundle complete.')
+    # Copy egg info: fixes several pkg_resources issues
+    copy_egg_info(dist_dir)
 
     return
 
+
+def copy_egg_info(dist_dir):
+    from zipfile import ZipFile
+
+    pkg_resources.working_set.add_entry(SPYREPO)
+    egg_map = {}
+    for dist in pkg_resources.working_set:
+        if dist.egg_info is None:
+            continue
+
+        try:
+            tops = dist.get_metadata('top_level.txt').strip().split('\n')
+            for top in tops:
+                egg_map.update({top: dist.egg_info})
+        except FileNotFoundError:
+            egg_map.update({dist.project_name: dist.egg_info})
+
+    base_dir = os.path.join(dist_dir, MAC_APP_NAME,
+                            'Contents', 'Resources', 'lib')
+    pkg_dir = os.path.join(base_dir, 'python{}.{}'.format(*PYVER))
+    lib_dir = os.path.join(pkg_dir, 'lib-dynload')
+    zip_dir = os.path.join(base_dir, 'python{}{}.zip'.format(*PYVER))
+
+    pkgs = set(f.name for f in os.scandir(pkg_dir))
+    pkgs.update(f.name for f in os.scandir(lib_dir))
+    pkgs.update(item.split(os.sep)[0] for item in ZipFile(zip_dir).namelist())
+
+    eggs = set()
+    for pkg in pkgs:
+        top = pkg.split('.')[0]
+
+        egg = None
+        try:
+            dist = pkg_resources.get_distribution(top)
+            egg = dist.egg_info
+        except Exception:
+            egg = egg_map.get(top, None)
+
+        if egg is not None:
+            eggs.add(egg)
+
+    for egg in eggs:
+        egg_name = os.path.basename(egg)
+        dest = os.path.join(pkg_dir, egg_name)
+        shutil.copytree(egg, dest)
+        logger.info(f'Copied {egg_name}')
 
 def make_disk_image(dist_dir, make_lite=False):
     """
@@ -231,8 +288,6 @@ def make_disk_image(dist_dir, make_lite=False):
 
     from dmgbuild import build_dmg
     from dmgbuild.core import DMGError
-    from spyder import __version__ as SPYVER
-    from spyder.config.base import MAC_APP_NAME
 
     volume_name = '{}-{} Py-{}.{}.{}'.format(MAC_APP_NAME[:-4], SPYVER, *PYVER)
     dmgfile = os.path.join(dist_dir, 'Spyder')
@@ -276,6 +331,9 @@ if __name__ == '__main__':
                         default=False, help='Create disk image')
     parser.add_argument('-d', '--dist-dir', dest='dist_dir', default='dist',
                         help='Distribution directory; passed to py2app')
+    parser.add_argument('-b', '--bdist-base', dest='build_dir',
+                        default='build',
+                        help='Build directory; passed to py2app')
 
     args, rem = parser.parse_known_args()
 
@@ -283,8 +341,10 @@ if __name__ == '__main__':
     sys.argv = sys.argv[:1] + ['py2app'] + rem
 
     dist_dir = os.path.abspath(args.dist_dir)
+    build_dir = os.path.abspath(args.build_dir)
 
     if args.make_app:
+        shutil.rmtree(build_dir, ignore_errors=True)
         make_app_bundle(dist_dir, make_lite=args.make_lite)
     else:
         logger.info('Skipping app bundle.')

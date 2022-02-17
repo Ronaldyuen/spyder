@@ -13,10 +13,11 @@ from qtpy.QtWidgets import QApplication
 
 # Local imports
 from spyder.api.plugins import Plugins, SpyderDockablePlugin
+from spyder.api.plugin_registration.decorators import (
+    on_plugin_available, on_plugin_teardown)
 from spyder.api.translations import get_translation
-from spyder.plugins.findinfiles.widgets import FindInFilesWidget
+from spyder.plugins.findinfiles.widgets.main_widget import FindInFilesWidget
 from spyder.plugins.mainmenu.api import ApplicationMenus
-from spyder.plugins.toolbar.api import ApplicationToolbars
 from spyder.utils.misc import getcwd_or_home
 
 # Localization
@@ -45,7 +46,8 @@ class FindInFiles(SpyderDockablePlugin):
 
     # --- SpyderDocakblePlugin API
     # ------------------------------------------------------------------------
-    def get_name(self):
+    @staticmethod
+    def get_name():
         return _("Find")
 
     def get_description(self):
@@ -54,24 +56,8 @@ class FindInFiles(SpyderDockablePlugin):
     def get_icon(self):
         return self.create_icon('findf')
 
-    def register(self):
-        widget = self.get_widget()
-        mainmenu = self.get_plugin(Plugins.MainMenu)
-        editor = self.get_plugin(Plugins.Editor)
-        projects = self.get_plugin(Plugins.Projects)
-
-        if editor:
-            widget.sig_edit_goto_requested.connect(
-                lambda filename, lineno, search_text, colno, colend: editor.load(
-                    filename, lineno, start_column=colno, end_column=colend))
-            # TODO: improve name of signal open_file_update?
-            editor.open_file_update.connect(self.set_current_opened_file)
-
-        if projects:
-            projects.sig_project_loaded.connect(self.set_project_path)
-            projects.sig_project_closed.connect(self.unset_project_path)
-
-        findinfiles_action = self.create_action(
+    def on_initialize(self):
+        self.create_action(
             FindInFilesActions.FindInFiles,
             text=_("Find in files"),
             tip=_("Search text in multiple files"),
@@ -79,15 +65,56 @@ class FindInFiles(SpyderDockablePlugin):
             register_shortcut=True,
             context=Qt.WindowShortcut
         )
-
-        if mainmenu:
-            menu = mainmenu.get_application_menu(ApplicationMenus.Search)
-            mainmenu.add_item_to_application_menu(
-                findinfiles_action,
-                menu=menu,
-            )
-
         self.refresh_search_directory()
+
+    @on_plugin_available(plugin=Plugins.Editor)
+    def on_editor_available(self):
+        widget = self.get_widget()
+        editor = self.get_plugin(Plugins.Editor)
+        widget.sig_edit_goto_requested.connect(
+            lambda filename, lineno, search_text, colno, colend: editor.load(
+                filename, lineno, start_column=colno, end_column=colend))
+        editor.sig_file_opened_closed_or_updated.connect(
+            self.set_current_opened_file)
+
+    @on_plugin_available(plugin=Plugins.Projects)
+    def on_projects_available(self):
+        projects = self.get_plugin(Plugins.Projects)
+        projects.sig_project_loaded.connect(self.set_project_path)
+        projects.sig_project_closed.connect(self.unset_project_path)
+
+    @on_plugin_available(plugin=Plugins.MainMenu)
+    def on_main_menu_available(self):
+        mainmenu = self.get_plugin(Plugins.MainMenu)
+        findinfiles_action = self.get_action(FindInFilesActions.FindInFiles)
+
+        mainmenu.add_item_to_application_menu(
+            findinfiles_action,
+            menu_id=ApplicationMenus.Search,
+        )
+
+    @on_plugin_teardown(plugin=Plugins.Editor)
+    def on_editor_teardown(self):
+        widget = self.get_widget()
+        editor = self.get_plugin(Plugins.Editor)
+        widget.sig_edit_goto_requested.disconnect()
+        editor.sig_file_opened_closed_or_updated.disconnect(
+            self.set_current_opened_file)
+
+    @on_plugin_teardown(plugin=Plugins.Projects)
+    def on_projects_teardon_plugin_teardown(self):
+        projects = self.get_plugin(Plugins.Projects)
+        projects.sig_project_loaded.disconnect(self.set_project_path)
+        projects.sig_project_closed.disconnect(self.unset_project_path)
+
+    @on_plugin_teardown(plugin=Plugins.MainMenu)
+    def on_main_menu_teardown(self):
+        mainmenu = self.get_plugin(Plugins.MainMenu)
+
+        mainmenu.remove_item_from_application_menu(
+            FindInFilesActions.FindInFiles,
+            menu_id=ApplicationMenus.Search,
+        )
 
     def on_close(self, cancelable=False):
         self.get_widget()._update_options()
@@ -102,7 +129,7 @@ class FindInFiles(SpyderDockablePlugin):
         """
         self.get_widget().set_directory(getcwd_or_home())
 
-    def set_current_opened_file(self, path):
+    def set_current_opened_file(self, path, _language):
         """
         Set path of current opened file in editor.
 

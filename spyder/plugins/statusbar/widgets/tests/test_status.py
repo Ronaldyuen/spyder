@@ -7,12 +7,9 @@
 
 """Tests for status bar widgets."""
 
-# Standard library imports
-from unittest.mock import Mock
-
 # Thrid party imports
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import QMainWindow
+from qtpy.QtWidgets import QComboBox, QMainWindow
 import pytest
 
 # Local imports
@@ -22,9 +19,7 @@ from spyder.plugins.statusbar.plugin import StatusBar
 
 
 class MainWindowMock(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self._PLUGINS = {'preferences': Mock()}
+    pass
 
 
 @pytest.fixture
@@ -33,7 +28,7 @@ def status_bar(qtbot):
     window = MainWindowMock()
     plugin = StatusBar(parent=window, configuration=CONF)
     plugin.remove_status_widgets()
-    plugin.register()
+    plugin.initialize()
 
     qtbot.addWidget(window)
     window.resize(640, 480)
@@ -59,6 +54,20 @@ class StatusBarWidgetTest(StatusBarWidget):
         return 'icon'
 
 
+class MyComboBox(QComboBox):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.addItems(['foo', 'bar'])
+
+
+class CustomStatusBarWidget(StatusBarWidget):
+    ID = 'custom_status'
+    CUSTOM_WIDGET_CLASS = MyComboBox
+
+    def get_icon(self):
+        return self.create_icon('environment')
+
+
 def test_status_bar_widget_signal(status_bar, qtbot):
     plugin, window = status_bar
 
@@ -74,6 +83,19 @@ def test_status_bar_widget_signal(status_bar, qtbot):
 
     assert w.get_tooltip() == 'tooltip'
     assert w.get_icon() == 'icon'
+
+
+def test_custom_widget(status_bar, qtbot):
+    plugin, window = status_bar
+
+    # Add widget to status bar
+    w = CustomStatusBarWidget(window)
+    w.set_value('Options: ')
+    plugin.add_status_widget(w)
+    # qtbot.stop()
+
+    # We create three widgets by default
+    assert len(plugin.STATUS_WIDGETS) == 4
 
 
 if __name__ == "__main__":

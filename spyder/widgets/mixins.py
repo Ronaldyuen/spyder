@@ -21,37 +21,47 @@ import sys
 import textwrap
 
 # Third party imports
-import qdarkstyle
-from qtpy.QtCore import QPoint, Qt
+from qtpy.QtCore import QPoint, QRegularExpression, Qt
 from qtpy.QtGui import QCursor, QTextCursor, QTextDocument
 from qtpy.QtWidgets import QApplication
-from qtpy import QT_VERSION
 from spyder_kernels.utils.dochelpers import (getargspecfromtext, getobj,
                                              getsignaturefromtext)
 
 # Local imports
-from spyder.config.gui import is_dark_interface
 from spyder.config.manager import CONF
-from spyder.py3compat import is_text_string, to_text_string
-from spyder.utils import encoding, sourcecode, programs
+from spyder.py3compat import to_text_string
+from spyder.utils import encoding, sourcecode
 from spyder.utils import syntaxhighlighters as sh
 from spyder.utils.misc import get_error_match
+from spyder.utils.palette import QStylePalette
 from spyder.widgets.arraybuilder import ArrayBuilderDialog
 
-QT55_VERSION = programs.check_version(QT_VERSION, "5.5", ">=")
 
-if QT55_VERSION:
-    from qtpy.QtCore import QRegularExpression
-else:
-    from qtpy.QtCore import QRegExp
+# List of possible EOL symbols
+EOL_SYMBOLS = [
+    # Put first as it correspond to a single line return
+    "\r\n",  # Carriage Return + Line Feed
+    "\r",  # Carriage Return
+    "\n",  # Line Feed
+    "\v",  # Line Tabulation
+    "\x0b",  # Line Tabulation
+    "\f",  # Form Feed
+    "\x0c",   # Form Feed
+    "\x1c",   # File Separator
+    "\x1d",   # Group Separator
+    "\x1e",   # Record Separator
+    "\x85",   # Next Line (C1 Control Code)
+    "\u2028",   # Line Separator
+    "\u2029",   # Paragraph Separator
+]
 
 
 class BaseEditMixin(object):
 
-    _PARAMETER_HIGHLIGHT_COLOR = '#DAA520'
-    _DEFAULT_TITLE_COLOR = '#2D62FF'
-    _CHAR_HIGHLIGHT_COLOR = 'red'
-    _DEFAULT_TEXT_COLOR = '#999999'
+    _PARAMETER_HIGHLIGHT_COLOR = QStylePalette.COLOR_ACCENT_4
+    _DEFAULT_TITLE_COLOR = QStylePalette.COLOR_ACCENT_4
+    _CHAR_HIGHLIGHT_COLOR = QStylePalette.COLOR_ACCENT_4
+    _DEFAULT_TEXT_COLOR = QStylePalette.COLOR_TEXT_2
     _DEFAULT_LANGUAGE = 'python'
     _DEFAULT_MAX_LINES = 10
     _DEFAULT_MAX_WIDTH = 60
@@ -134,21 +144,16 @@ class BaseEditMixin(object):
         if id(widget) in self._styled_widgets:
             return
         self._styled_widgets.add(id(widget))
-
-        if is_dark_interface():
-            css = qdarkstyle.load_stylesheet(qt_api='')
-            widget.setStyleSheet(css)
-            palette = widget.palette()
-            background = palette.color(palette.Window).lighter(150).name()
-            border = palette.color(palette.Window).lighter(200).name()
-            name = widget.__class__.__name__
-            widget.setObjectName(name)
-            extra_css = '''
-                {0}#{0} {{
-                    background-color:{1};
-                    border: 1px solid {2};
-                }}'''.format(name, background, border)
-            widget.setStyleSheet(css + extra_css)
+        background = QStylePalette.COLOR_BACKGROUND_4
+        border = QStylePalette.COLOR_TEXT_4
+        name = widget.__class__.__name__
+        widget.setObjectName(name)
+        css = '''
+            {0}#{0} {{
+                background-color:{1};
+                border: 1px solid {2};
+            }}'''.format(name, background, border)
+        widget.setStyleSheet(css)
 
     def _get_inspect_shortcut(self):
         """
@@ -299,7 +304,8 @@ class BaseEditMixin(object):
                 shortcut = self._get_inspect_shortcut()
                 if shortcut:
                     base_style = (
-                        'background-color:#fafbfc;color:#444d56;'
+                        f'background-color:{QStylePalette.COLOR_BACKGROUND_4};'
+                        f'color:{QStylePalette.COLOR_TEXT_1};'
                         'font-size:11px;'
                     )
                     help_text = ''
@@ -316,7 +322,8 @@ class BaseEditMixin(object):
                 template += (
                     '<hr>'
                     '<div align="left">'
-                    '<span style="color:#148CD2;text-decoration:none;'
+                    f'<span style="color: {QStylePalette.COLOR_ACCENT_4};'
+                    'text-decoration:none;'
                     'font-family:"{font_family}";font-size:{size}pt;><i>'
                     ''.format(font_family=font_family,
                               size=text_size)
@@ -675,13 +682,31 @@ class BaseEditMixin(object):
         pass
 
     #------EOL characters
-    def set_eol_chars(self, text):
-        """Set widget end-of-line (EOL) characters from text (analyzes text)"""
-        if not is_text_string(text): # testing for QString (PyQt API#1)
-            text = to_text_string(text)
-        eol_chars = sourcecode.get_eol_chars(text)
-        is_document_modified = eol_chars is not None and self.eol_chars is not None
-        self.eol_chars = eol_chars
+    def set_eol_chars(self, text=None, eol_chars=None):
+        """
+        Set widget end-of-line (EOL) characters.
+
+        Parameters
+        ----------
+        text: str
+            Text to detect EOL characters from.
+        eol_chars: str
+            EOL characters to set.
+
+        Notes
+        -----
+        If `text` is passed, then `eol_chars` has no effect.
+        """
+        if text is not None:
+            detected_eol_chars = sourcecode.get_eol_chars(text)
+            is_document_modified = (
+                detected_eol_chars is not None and self.eol_chars is not None
+            )
+            self.eol_chars = detected_eol_chars
+        elif eol_chars is not None:
+            is_document_modified = eol_chars != self.eol_chars
+            self.eol_chars = eol_chars
+
         if is_document_modified:
             self.document().setModified(True)
             if self.sig_eol_chars_changed is not None:
@@ -696,15 +721,15 @@ class BaseEditMixin(object):
             return os.linesep
 
     def get_text_with_eol(self):
-        """Same as 'toPlainText', replace '\n'
-        by correct end-of-line characters"""
-        utext = to_text_string(self.toPlainText())
-        lines = utext.splitlines()
+        """
+        Same as 'toPlainText', replacing '\n' by correct end-of-line
+        characters.
+        """
+        text = self.toPlainText()
         linesep = self.get_line_separator()
-        txt = linesep.join(lines)
-        if utext.endswith('\n'):
-            txt += linesep
-        return txt
+        for symbol in EOL_SYMBOLS:
+            text = text.replace(symbol, linesep)
+        return text
 
     #------Positions, coordinates (cursor, EOF, ...)
     def get_position(self, subject):
@@ -910,9 +935,7 @@ class BaseEditMixin(object):
         if remove_newlines:
             remove_newlines = position_from != 'sof' or position_to != 'eof'
         if text and remove_newlines:
-            while text.endswith("\n"):
-                text = text[:-1]
-            while text.endswith(u"\u2029"):
+            while text and text[-1] in EOL_SYMBOLS:
                 text = text[:-1]
         return text
 
@@ -1122,11 +1145,15 @@ class BaseEditMixin(object):
 
         return word
 
+    def get_line_indentation(self, text):
+        """Get indentation for given line."""
+        text = text.replace("\t", " "*self.tab_stop_width_spaces)
+        return len(text)-len(text.lstrip())
+
     def get_block_indentation(self, block_nb):
         """Return line indentation (character number)."""
         text = to_text_string(self.document().findBlockByNumber(block_nb).text())
-        text = text.replace("\t", " "*self.tab_stop_width_spaces)
-        return len(text)-len(text.lstrip())
+        return self.get_line_indentation(text)
 
     def get_selection_bounds(self, cursor=None):
         """Return selection bounds (block numbers)."""
@@ -1236,9 +1263,15 @@ class BaseEditMixin(object):
 
     def find_text(self, text, changed=True, forward=True, case=False,
                   word=False, regexp=False):
-        """Find text"""
+        """Find text."""
         cursor = self.textCursor()
         findflag = QTextDocument.FindFlag()
+
+        # Get visible region to center cursor in case it's necessary.
+        if getattr(self, 'get_visible_block_numbers', False):
+            current_visible_region = self.get_visible_block_numbers()
+        else:
+            current_visible_region = None
 
         if not forward:
             findflag = findflag | QTextDocument.FindBackward
@@ -1264,16 +1297,10 @@ class BaseEditMixin(object):
         else:
             text = re.escape(to_text_string(text))
 
-        if QT55_VERSION:
-            pattern = QRegularExpression(u"\\b{}\\b".format(text) if word else
-                                         text)
-            if case:
-                pattern.setPatternOptions(
-                    QRegularExpression.CaseInsensitiveOption)
-        else:
-            pattern = QRegExp(u"\\b{}\\b".format(text)
-                              if word else text, Qt.CaseSensitive if case else
-                              Qt.CaseInsensitive, QRegExp.RegExp2)
+        pattern = QRegularExpression(u"\\b{}\\b".format(text) if word else
+                                     text)
+        if case:
+            pattern.setPatternOptions(QRegularExpression.CaseInsensitiveOption)
 
         for move in moves:
             cursor.movePosition(move)
@@ -1287,6 +1314,14 @@ class BaseEditMixin(object):
                 found_cursor = self.document().find(pattern, cursor, findflag)
             if found_cursor is not None and not found_cursor.isNull():
                 self.setTextCursor(found_cursor)
+
+                # Center cursor if we move out of the visible region.
+                if current_visible_region is not None:
+                    found_visible_region = self.get_visible_block_numbers()
+                    if current_visible_region != found_visible_region:
+                        current_visible_region = found_visible_region
+                        self.centerCursor()
+
                 return True
 
         return False
@@ -1492,7 +1527,7 @@ class SaveHistoryMixin(object):
     SEPARATOR = None
     HISTORY_FILENAMES = []
 
-    append_to_history = None
+    sig_append_to_history_requested = None
 
     def __init__(self, history_filename=''):
         self.history_filename = history_filename
@@ -1530,8 +1565,9 @@ class SaveHistoryMixin(object):
             encoding.write(text, self.history_filename, mode='ab')
         except EnvironmentError:
             pass
-        if self.append_to_history is not None:
-            self.append_to_history.emit(self.history_filename, text)
+        if self.sig_append_to_history_requested is not None:
+            self.sig_append_to_history_requested.emit(
+                self.history_filename, text)
 
 
 class BrowseHistory(object):

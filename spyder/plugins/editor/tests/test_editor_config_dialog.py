@@ -6,10 +6,7 @@
 # ----------------------------------------------------------------------------
 """Tests for plugin config dialog."""
 
-try:
-    from unittest.mock import Mock
-except ImportError:
-    from mock import Mock  # Python 2
+from unittest.mock import Mock
 
 # Test library imports
 import pytest
@@ -32,6 +29,7 @@ class MainWindowMock(QMainWindow):
     debug_toolbar_actions = []
     source_menu_actions = []
     source_toolbar_actions = []
+    search_menu_actions = []
     statusbar = Mock()
     all_actions_defined = Mock()
     sig_pythonpath_changed = Mock()

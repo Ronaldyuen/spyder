@@ -39,8 +39,8 @@ from setuptools.command.install import install
 # Taken from the notebook setup.py -- Modified BSD License
 # =============================================================================
 v = sys.version_info
-if v[0] >= 3 and v[:2] < (3, 6):
-    error = "ERROR: Spyder requires Python version 3.6 and above."
+if v[0] >= 3 and v[:2] < (3, 7):
+    error = "ERROR: Spyder requires Python version 3.7 and above."
     print(error, file=sys.stderr)
     sys.exit(1)
 
@@ -178,14 +178,13 @@ setup_args = dict(
     package_data={LIBNAME: get_package_data(LIBNAME, EXTLIST)},
     scripts=[osp.join('scripts', fname) for fname in SCRIPTS],
     data_files=get_data_files(),
-    python_requires='>=3.6',
+    python_requires='>=3.7',
     classifiers=[
         'License :: OSI Approved :: MIT License',
         'Operating System :: MacOS',
         'Operating System :: Microsoft :: Windows',
         'Operating System :: POSIX :: Linux',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
@@ -208,37 +207,40 @@ install_requires = [
     'cookiecutter>=1.6.0',
     'diff-match-patch>=20181111',
     'intervaltree>=3.0.2',
-    'ipython>=7.6.0',
-    'jedi==0.17.2',
+    'ipython>=7.6.0,<8.0.0',
+    'jedi>=0.17.2,<0.19.0',
+    'jellyfish>=0.7',
     'jsonschema>=3.2.0',
     'keyring>=17.0.0',
     'nbconvert>=4.0',
     'numpydoc>=0.6.0',
     # Required to get SSH connections to remote kernels
     'paramiko>=2.4.0;platform_system=="Windows"',
-    'parso==0.7.0',
+    'parso>=0.7.0,<0.9.0',
     'pexpect>=4.4.0',
     'pickleshare>=0.4',
     'psutil>=5.3',
     'pygments>=2.0',
-    'pylint>=1.0',
+    'pylint>=2.5.0',
+    'python-lsp-black>=1.0.0',
+    'pyls-spyder>=0.4.0',
     'pyqt5<5.13',
     'pyqtwebengine<5.13',
-    'python-language-server[all]>=0.36.2,<1.0.0',
-    'pyls-black>=0.4.6',
-    'pyls-spyder>=0.3.2',
+    'python-lsp-server[all]>=1.3.2,<1.4.0',
     'pyxdg>=0.26;platform_system=="Linux"',
     'pyzmq>=17',
-    'qdarkstyle>=2.8',
-    'qtawesome>=0.5.7',
-    'qtconsole>=5.0.1',
+    'qdarkstyle==3.0.2',
+    'qstylizer>=0.1.10',
+    'qtawesome>=1.0.2',
+    'qtconsole>=5.2.1,<5.3.0',
     'qtpy>=1.5.0',
-    'setuptools>=39.0.0',
+    'rtree>=0.9.7',
+    'setuptools>=49.6.0',
     'sphinx>=0.6.6',
-    'spyder-kernels>=1.10.2,<1.11.0',
+    'spyder-kernels>=2.2.1,<2.3.0',
     'textdistance>=4.2.0',
     'three-merge>=0.1.1',
-    'watchdog>=0.10.3,<2.0.0'
+    'watchdog>=0.10.3'
 ]
 
 extras_require = {
@@ -249,14 +251,13 @@ extras_require = {
         'cython',
         'flaky',
         'matplotlib',
-        'mock',
         'pandas',
         'pillow',
-        'pytest<6.0',
+        'pytest<7.0',
         'pytest-cov',
         'pytest-lazy-fixture',
         'pytest-mock',
-        'pytest-ordering',
+        'pytest-order',
         'pytest-qt',
         'pyyaml',
         'scipy',
@@ -269,7 +270,7 @@ spyder_plugins_entry_points = [
     'appearance = spyder.plugins.appearance.plugin:Appearance',
     'application = spyder.plugins.application.plugin:Application',
     'breakpoints = spyder.plugins.breakpoints.plugin:Breakpoints',
-    'completions = spyder.plugins.completion.manager.plugin:CompletionManager',
+    'completions = spyder.plugins.completion.plugin:CompletionPlugin',
     'editor = spyder.plugins.editor.plugin:Editor',
     'explorer = spyder.plugins.explorer.plugin:Explorer',
     'find_in_files = spyder.plugins.findinfiles.plugin:FindInFiles',
@@ -277,6 +278,7 @@ spyder_plugins_entry_points = [
     'historylog = spyder.plugins.history.plugin:HistoryLog',
     'internal_console = spyder.plugins.console.plugin:Console',
     'ipython_console = spyder.plugins.ipythonconsole.plugin:IPythonConsole',
+    'layout = spyder.plugins.layout.plugin:Layout',
     'main_interpreter = spyder.plugins.maininterpreter.plugin:MainInterpreter',
     'mainmenu = spyder.plugins.mainmenu.plugin:MainMenu',
     'onlinehelp = spyder.plugins.onlinehelp.plugin:OnlineHelp',
@@ -290,8 +292,20 @@ spyder_plugins_entry_points = [
     'shortcuts = spyder.plugins.shortcuts.plugin:Shortcuts',
     'statusbar = spyder.plugins.statusbar.plugin:StatusBar',
     'toolbar = spyder.plugins.toolbar.plugin:Toolbar',
+    'tours = spyder.plugins.tours.plugin:Tours',
     'variable_explorer = spyder.plugins.variableexplorer.plugin:VariableExplorer',
     'workingdir = spyder.plugins.workingdirectory.plugin:WorkingDirectory',
+]
+
+spyder_completions_entry_points = [
+    ('fallback = spyder.plugins.completion.providers.fallback.provider:'
+     'FallbackProvider'),
+    ('snippets = spyder.plugins.completion.providers.snippets.provider:'
+     'SnippetsProvider'),
+    ('kite = spyder.plugins.completion.providers.kite.provider:'
+     'KiteProvider'),
+    ('lsp = spyder.plugins.completion.providers.languageserver.provider:'
+     'LanguageServerProvider'),
 ]
 
 
@@ -302,6 +316,7 @@ setup_args['entry_points'] = {
             'spyder = spyder.app.start:main'
     ],
     'spyder.plugins': spyder_plugins_entry_points,
+    'spyder.completions': spyder_completions_entry_points
 }
 setup_args.pop('scripts', None)
 
