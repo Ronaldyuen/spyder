@@ -128,9 +128,9 @@ def get_span(match, key=None):
         start, end = match.span(key)
     else:
         start, end = match.span()
-    start = qstring_length(match.string[:start])
-    end = qstring_length(match.string[:end])
-    return start, end
+    start16 = qstring_length(match.string[:start])
+    end16 = start16 + qstring_length(match.string[start:end])
+    return start16, end16
 
 
 def get_color_scheme(name):
@@ -1285,6 +1285,9 @@ class PygmentsSH(BaseSH):
         # Flag variable to avoid unnecessary highlights if the worker has not
         # yet finished processing
         self._allow_highlight = True
+
+    def stop(self):
+        self._worker_manager.terminate_all()
 
     def make_charlist(self):
         """Parses the complete text and stores format for each character."""

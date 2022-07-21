@@ -240,28 +240,32 @@ class PlotsWidget(ShellConnectMainWidget):
             value = figviewer.figcanvas.fig is not None
 
         for __, action in self.get_actions().items():
-            if action and action not in [self.mute_action,
-                                         self.outline_action,
-                                         self.fit_action,
-                                         self.undock_action,
-                                         self.close_action,
-                                         self.dock_action,
-                                         self.toggle_view_action]:
-                action.setEnabled(value)
+            try:
+                if action and action not in [self.mute_action,
+                                             self.outline_action,
+                                             self.fit_action,
+                                             self.undock_action,
+                                             self.close_action,
+                                             self.dock_action,
+                                             self.toggle_view_action,
+                                             self.lock_unlock_action]:
+                    action.setEnabled(value)
 
-                # IMPORTANT: Since we are defining the main actions in here
-                # and the context is WidgetWithChildrenShortcut we need to
-                # assign the same actions to the children widgets in order
-                # for shortcuts to work
-                if figviewer:
-                    figviewer_actions = figviewer.actions()
-                    thumbnails_sb_actions = thumbnails_sb.actions()
+                    # IMPORTANT: Since we are defining the main actions in here
+                    # and the context is WidgetWithChildrenShortcut we need to
+                    # assign the same actions to the children widgets in order
+                    # for shortcuts to work
+                    if figviewer:
+                        figviewer_actions = figviewer.actions()
+                        thumbnails_sb_actions = thumbnails_sb.actions()
 
-                    if action not in figviewer_actions:
-                        figviewer.addAction(action)
+                        if action not in figviewer_actions:
+                            figviewer.addAction(action)
 
-                    if action not in thumbnails_sb_actions:
-                        thumbnails_sb.addAction(action)
+                        if action not in thumbnails_sb_actions:
+                            thumbnails_sb.addAction(action)
+            except (RuntimeError, AttributeError):
+                pass
 
         self.zoom_disp.setEnabled(value)
 
@@ -303,6 +307,16 @@ class PlotsWidget(ShellConnectMainWidget):
         return fig_browser
 
     def close_widget(self, fig_browser):
+        fig_browser.sig_redirect_stdio_requested.disconnect(
+            self.sig_redirect_stdio_requested)
+
+        fig_browser.sig_figure_menu_requested.disconnect(
+            self.show_figure_menu)
+        fig_browser.sig_thumbnail_menu_requested.disconnect(
+            self.show_thumbnail_menu)
+        fig_browser.sig_figure_loaded.disconnect(self.update_actions)
+        fig_browser.sig_save_dir_changed.disconnect()
+        fig_browser.sig_zoom_changed.disconnect(self.zoom_disp.setValue)
         fig_browser.close()
 
     def switch_widget(self, fig_browser, old_fig_browser):

@@ -612,8 +612,10 @@ class DataFrameModel(QAbstractTableModel):
     def get_bgcolor(self, index):
         """Background color depending on value."""
         column = index.column()
+
         if not self.bgcolor_enabled:
             return
+
         value = self.get_value(index.row(), column)
         if self.max_min_col[column] is None or pd.isna(value):
             color = QColor(BACKGROUND_NONNUMBER_COLOR)
@@ -659,6 +661,7 @@ class DataFrameModel(QAbstractTableModel):
             color = QColor.fromHsvF(hue, BACKGROUND_NUMBER_SATURATION,
                                     BACKGROUND_NUMBER_VALUE,
                                     BACKGROUND_NUMBER_ALPHA)
+
         return color
 
     def get_value(self, row, column):
@@ -1216,7 +1219,7 @@ class DataFrameHeaderModel(QAbstractTableModel):
             if orientation == Qt.Horizontal:
                 return Qt.AlignCenter
             else:
-                return Qt.AlignRight | Qt.AlignVCenter
+                return int(Qt.AlignRight | Qt.AlignVCenter)
         if role != Qt.DisplayRole and role != Qt.ToolTipRole:
             return None
         if self.axis == 1 and self._shape[1] <= 1:
@@ -1308,7 +1311,7 @@ class DataFrameLevelModel(QAbstractTableModel):
             if orientation == Qt.Horizontal:
                 return Qt.AlignCenter
             else:
-                return Qt.AlignRight | Qt.AlignVCenter
+                return int(Qt.AlignRight | Qt.AlignVCenter)
         if role != Qt.DisplayRole and role != Qt.ToolTipRole:
             return None
         if self.model.header_shape[0] <= 1 and orientation == Qt.Horizontal:
@@ -2003,9 +2006,6 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
 
 def _test_edit(data, title="", parent=None):
     """Test subroutine"""
-    app = qapplication()  # analysis:ignore
-    # cross platform pyqt5 style
-    app.setStyle("Fusion")
     dlg = DataFrameEditor(parent=parent)
 
     if dlg.setup_and_check(data, title=title):
@@ -2031,6 +2031,8 @@ def _test_wrapper(func, df, is_profiling=False):
 
 def test():
     """DataFrame editor test"""
+    app = qapplication()  # analysis:ignore
+
     import random
     import datetime
     string_list = ['AAAA', 'BBBBB', 'CCCCCCC', 'DDDDDDDD', 'EEEEEEE']

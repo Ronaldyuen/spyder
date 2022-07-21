@@ -31,8 +31,6 @@ from spyder.config.manager import CONF
 from spyder.widgets.collectionseditor import (
     RemoteCollectionsEditorTableView, CollectionsEditorTableView,
     CollectionsModel, CollectionsEditor, LARGE_NROWS, ROWS_TO_LOAD, natsort)
-from spyder.plugins.variableexplorer.widgets.namespacebrowser import (
-    NamespacesBrowserFinder)
 from spyder.plugins.variableexplorer.widgets.tests.test_dataframeeditor import \
     generate_pandas_indexes
 from spyder.py3compat import PY2, to_text_string
@@ -153,23 +151,29 @@ def test_remove_remote_variable(qtbot, monkeypatch):
     """Test the removing of the correct remote variable."""
     variables = {'a': {'type': 'int',
                        'size': 1,
-                       'color': '#0000ff',
-                       'view': '1'},
+                       'view': '1',
+                       'python_type': 'int',
+                       'numpy_type': 'Unknown'},
                  'b': {'type': 'int',
                        'size': 1,
-                       'color': '#0000ff',
-                       'view': '2'},
+                       'view': '2',
+                       'python_type': 'int',
+                       'numpy_type': 'Unknown'},
                  'c': {'type': 'int',
                        'size': 1,
-                       'color': '#0000ff',
-                       'view': '3'},
+                       'view': '3',
+                       'python_type': 'int',
+                       'numpy_type': 'Unknown'},
                  'd': {'type': 'str',
-                       'size': 1, 'color': '#800000',
-                       'view': '4'},
+                       'size': 1,
+                       'view': '4',
+                       'python_type': 'int',
+                       'numpy_type': 'Unknown'},
                  'e': {'type': 'int',
                        'size': 1,
-                       'color': '#0000ff',
-                       'view': '5'}}
+                       'view': '5',
+                       'python_type': 'int',
+                       'numpy_type': 'Unknown'}}
     editor = RemoteCollectionsEditorTableView(None, variables.copy())
     qtbot.addWidget(editor)
     editor.setCurrentIndex(editor.model.index(1, 0))
@@ -179,19 +183,24 @@ def test_remove_remote_variable(qtbot, monkeypatch):
         assert names == ['b']
         data = {'a': {'type': 'int',
                       'size': 1,
-                      'color': '#0000ff',
-                      'view': '1'},
+                      'view': '1',
+                      'python_type': 'int',
+                      'numpy_type': 'Unknown'},
                 'c': {'type': 'int',
                       'size': 1,
-                      'color': '#0000ff',
-                      'view': '3'},
+                      'view': '3',
+                      'python_type': 'int',
+                      'numpy_type': 'Unknown'},
                 'd': {'type': 'str',
-                      'size': 1, 'color': '#800000',
-                      'view': '4'},
+                      'size': 1,
+                      'view': '4',
+                      'python_type': 'int',
+                      'numpy_type': 'Unknown'},
                 'e': {'type': 'int',
                       'size': 1,
-                      'color': '#0000ff',
-                      'view': '5'}}
+                      'view': '5',
+                      'python_type': 'int',
+                      'numpy_type': 'Unknown'}}
         editor.set_data(data)
     monkeypatch.setattr(
         'spyder.widgets'
@@ -221,34 +230,38 @@ def test_filter_rows(qtbot):
     """Test rows filtering."""
     data = (
         {'dfa':
-            {'type': 'DataFrame', 'size': (2, 1), 'color': '#00ff00',
-             'view': 'Column names: 0'},
+            {'type': 'DataFrame',
+             'size': (2, 1),
+             'view': 'Column names: 0',
+             'python_type': 'DataFrame',
+             'numpy_type': 'Unknown'},
          'dfb':
-            {'type': 'DataFrame', 'size': (2, 1), 'color': '#00ff00',
-             'view': 'Column names: 0'}}
+            {'type': 'DataFrame',
+             'size': (2, 1),
+             'view': 'Column names: 0',
+             'python_type': 'DataFrame',
+             'numpy_type': 'Unknown'}}
     )
     editor = RemoteCollectionsEditorTableView(None, data)
-    editor.finder = NamespacesBrowserFinder(
-        editor, editor.set_regex)
     qtbot.addWidget(editor)
 
     # Initially two rows
     assert editor.model.rowCount() == 2
 
     # Match two rows by name
-    editor.finder.setText("df")
+    editor.do_find("df")
     assert editor.model.rowCount() == 2
 
     # Match two rows by type
-    editor.finder.setText("DataFrame")
+    editor.do_find("DataFrame")
     assert editor.model.rowCount() == 2
 
     # Only one match
-    editor.finder.setText("dfb")
+    editor.do_find("dfb")
     assert editor.model.rowCount() == 1
 
     # No match
-    editor.finder.setText("dfbc")
+    editor.do_find("dfbc")
     assert editor.model.rowCount() == 0
 
 
@@ -735,8 +748,8 @@ def test_edit_nonsettable_objects(qtbot, nonsettable_objects_data):
     for test_obj, expected_obj, keys in nonsettable_objects_data:
         col_editor = CollectionsEditor(None)
         col_editor.setup(test_obj)
-        col_editor.show()
-        qtbot.waitForWindowShown(col_editor)
+        with qtbot.waitExposed(col_editor):
+            col_editor.show()
         view = col_editor.widget.editor
         indicies = [view.source_model.get_index_from_key(key) for key in keys]
 
