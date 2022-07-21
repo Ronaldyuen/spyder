@@ -502,6 +502,9 @@ class DataFrameModel(QAbstractTableModel):
                 else:
                     # reach here iff only column only contains one value and nan
                     max_min = [vmax, vmin - 1]
+                    # if its a large float, then we need other method to set a min
+                    if max_min[0] == max_min[1]:
+                        max_min[1] = max_min[0] / 10
                 self.max_min_col[idx] = max_min
 
     def get_format(self):
@@ -2036,6 +2039,7 @@ def test():
     datetime_list = [datetime.datetime(2018, 1, 1, 1, 1, 1), datetime.datetime(2022, 2, 2, 2, 2, 2)]
     true_false_list = [True, False]
     float_inf_list = [0.11, 999.8, np.inf, -np.inf]
+    large_float_nan_list = [10.1231321321321321 ** 18, np.nan]
     nrow = 10000
     r = random.Random(502)
     df1 = DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['Test'])
@@ -2051,6 +2055,7 @@ def test():
     df1 = df1.join([DataFrame([r.choice(string_list_2) for _ in range(nrow)], columns=['string_list_2'])])
     df1 = df1.join([DataFrame([r.choice(datetime_list) for _ in range(nrow)], columns=['date_time'])])
     df1 = df1.join([DataFrame([r.choice(float_inf_list) for _ in range(nrow)], columns=['float_inf_list'])])
+    df1 = df1.join([DataFrame([r.choice(large_float_nan_list) for _ in range(nrow)], columns=['float_nan_list'])])
     df1 = df1.join([DataFrame(np.random.rand(nrow, 10), columns=list(map(chr, range(97, 107))))])
     df1.loc[1, 'a'] = float('nan')
     df1 = df1.join([DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
