@@ -14,6 +14,7 @@ This is the main widget used in the Variable Explorer plugin
 import os
 import os.path as osp
 from pickle import UnpicklingError
+import tarfile
 
 # Third library imports
 from qtpy import PYQT5
@@ -30,6 +31,7 @@ from spyder_kernels.utils.nsview import REMOTE_SETTINGS
 # Local imports
 from spyder.api.translations import get_translation
 from spyder.api.widgets.mixins import SpyderWidgetMixin
+from spyder.config.utils import IMPORT_EXT
 from spyder.widgets.collectionseditor import RemoteCollectionsEditorTableView
 from spyder.plugins.variableexplorer.widgets.importwizard import ImportWizard
 from spyder.utils import encoding
@@ -161,8 +163,10 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
         except TypeError:
             pass
 
-    def refresh_namespacebrowser(self, interrupt=True):
+    def refresh_namespacebrowser(self, *, interrupt=True):
         """Refresh namespace browser"""
+        if not self.shellwidget.spyder_kernel_ready:
+            return
         self.shellwidget.call_kernel(
             interrupt=interrupt,
             callback=self.process_remote_view
@@ -173,15 +177,17 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
             callback=self.set_var_properties
         ).get_var_properties()
 
-    def set_namespace_view_settings(self):
+    def set_namespace_view_settings(self, interrupt=True):
         """Set the namespace view settings"""
+        if not self.shellwidget.spyder_kernel_ready:
+            return
         settings = self.get_view_settings()
         self.shellwidget.call_kernel(
-            interrupt=True
+            interrupt=interrupt
         ).set_namespace_view_settings(settings)
 
-    def on_kernel_started(self):
-        self.set_namespace_view_settings()
+    def setup_kernel(self):
+        self.set_namespace_view_settings(interrupt=False)
         self.refresh_namespacebrowser(interrupt=False)
 
     def process_remote_view(self, remote_view):
@@ -273,6 +279,8 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
 
     def load_data(self, filename, ext):
         """Load data from a file."""
+        if not self.shellwidget.spyder_kernel_ready:
+            return
         overwrite = False
         if self.editor.var_properties:
             message = _('Do you want to overwrite old '
@@ -299,6 +307,14 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
         except TimeoutError:
             msg = _("Data is too big to be loaded")
             return msg
+        except tarfile.ReadError:
+            # Fixes spyder-ide/spyder#19126
+            msg = _("The file could not be opened successfully. Recall that "
+                    "the Variable Explorer supports the following file "
+                    "extensions to import data:"
+                    "<br><br><tt>{extensions}</tt>").format(
+                        extensions=', '.join(IMPORT_EXT))
+            return msg
         except (UnpicklingError, RuntimeError, CommError):
             return None
 
@@ -312,6 +328,8 @@ class NamespaceBrowser(QWidget, SpyderWidgetMixin):
 
     def save_data(self):
         """Save data"""
+        if not self.shellwidget.spyder_kernel_ready:
+            return
         filename = self.filename
         if filename is None:
             filename = getcwd_or_home()

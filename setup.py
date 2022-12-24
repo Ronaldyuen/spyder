@@ -224,22 +224,23 @@ install_requires = [
     'psutil>=5.3',
     'pygments>=2.0',
     'pylint>=2.5.0,<3.0',
+    'pylint-venv>=2.1.1',
     'python-lsp-black>=1.2.0',
     'pyls-spyder>=0.4.0',
     'pyqt5<5.16',
     'pyqtwebengine<5.16',
-    'python-lsp-server[all]>=1.5.0,<1.6.0',
+    'python-lsp-server[all]>=1.6.0,<1.7.0',
     'pyxdg>=0.26;platform_system=="Linux"',
     'pyzmq>=22.1.0',
     'qdarkstyle>=3.0.2,<3.1.0',
-    'qstylizer>=0.1.10',
-    'qtawesome>=1.0.2',
-    'qtconsole>=5.3.0,<5.4.0',
+    'qstylizer>=0.2.2',
+    'qtawesome>=1.2.1',
+    'qtconsole>=5.4.0,<5.5.0',
     'qtpy>=2.1.0',
     'rtree>=0.9.7',
     'setuptools>=49.6.0',
     'sphinx>=0.6.6',
-    'spyder-kernels>=2.3.2,<2.4.0',
+    'spyder-kernels>=2.4.0,<2.5.0',
     'textdistance>=4.2.0',
     'three-merge>=0.1.1',
     'watchdog>=0.10.3'
@@ -250,9 +251,9 @@ if 'dev' in __version__:
     reqs_to_loosen = {'python-lsp-server[all]', 'qtconsole', 'spyder-kernels'}
     install_requires = [req for req in install_requires
                         if req.split(">")[0] not in reqs_to_loosen]
-    install_requires.append('python-lsp-server[all]>=1.5.0,<1.7.0')
-    install_requires.append('qtconsole>=5.3.0,<5.5.0')
-    install_requires.append('spyder-kernels>=2.3.2,<3.1.0')
+    install_requires.append('python-lsp-server[all]>=1.6.0,<1.8.0')
+    install_requires.append('qtconsole>=5.4.0,<5.6.0')
+    install_requires.append('spyder-kernels>=2.4.0,<3.1.0')
 
 extras_require = {
     'test:platform_system == "Windows"': ['pywin32'],
@@ -282,6 +283,7 @@ spyder_plugins_entry_points = [
     'application = spyder.plugins.application.plugin:Application',
     'breakpoints = spyder.plugins.breakpoints.plugin:Breakpoints',
     'completions = spyder.plugins.completion.plugin:CompletionPlugin',
+    'debugger = spyder.plugins.debugger.plugin:Debugger',
     'editor = spyder.plugins.editor.plugin:Editor',
     'explorer = spyder.plugins.explorer.plugin:Explorer',
     'find_in_files = spyder.plugins.findinfiles.plugin:FindInFiles',
@@ -299,13 +301,13 @@ spyder_plugins_entry_points = [
     'profiler = spyder.plugins.profiler.plugin:Profiler',
     'project_explorer = spyder.plugins.projects.plugin:Projects',
     'pylint = spyder.plugins.pylint.plugin:Pylint',
+    'pythonpath_manager = spyder.plugins.pythonpath.plugin:PythonpathManager',
     'run = spyder.plugins.run.plugin:Run',
     'shortcuts = spyder.plugins.shortcuts.plugin:Shortcuts',
     'statusbar = spyder.plugins.statusbar.plugin:StatusBar',
     'toolbar = spyder.plugins.toolbar.plugin:Toolbar',
     'tours = spyder.plugins.tours.plugin:Tours',
     'variable_explorer = spyder.plugins.variableexplorer.plugin:VariableExplorer',
-    'frames_explorer = spyder.plugins.framesexplorer.plugin:FramesExplorer',
     'workingdir = spyder.plugins.workingdirectory.plugin:WorkingDirectory',
 ]
 

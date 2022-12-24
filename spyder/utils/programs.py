@@ -32,7 +32,6 @@ import psutil
 # Local imports
 from spyder.config.base import (running_under_pytest, get_home_dir,
                                 running_in_mac_app)
-from spyder.py3compat import is_text_string, to_text_string
 from spyder.utils import encoding
 from spyder.utils.misc import get_python_executable
 
@@ -140,7 +139,7 @@ def find_program(basename):
         # Windows platforms
         extensions = ('.exe', '.bat', '.cmd')
         if not basename.endswith(extensions):
-            names = [basename+ext for ext in extensions]+[basename]
+            names = [basename + ext for ext in extensions] + [basename]
     for name in names:
         path = is_program_installed(name)
         if path:
@@ -223,9 +222,8 @@ def run_shell_command(cmdstr, **subprocess_kwargs):
     :subprocess_kwargs: These will be passed to subprocess.Popen.
     """
     if 'shell' in subprocess_kwargs and not subprocess_kwargs['shell']:
-        raise ProgramError(
-                'The "shell" kwarg may be omitted, but if '
-                'provided it must be True.')
+        raise ProgramError('The "shell" kwarg may be omitted, but if '
+                           'provided it must be True.')
     else:
         subprocess_kwargs['shell'] = True
 
@@ -239,7 +237,7 @@ def run_shell_command(cmdstr, **subprocess_kwargs):
     for stream in ['stdin', 'stdout', 'stderr']:
         subprocess_kwargs.setdefault(stream, subprocess.PIPE)
     subprocess_kwargs = alter_subprocess_kwargs_by_platform(
-            **subprocess_kwargs)
+        **subprocess_kwargs)
     return subprocess.Popen(cmdstr, **subprocess_kwargs)
 
 
@@ -266,9 +264,8 @@ def run_program(program, args=None, **subprocess_kwargs):
     :subprocess_kwargs: These will be passed to subprocess.Popen.
     """
     if 'shell' in subprocess_kwargs and subprocess_kwargs['shell']:
-        raise ProgramError(
-                "This function is only for non-shell programs, "
-                "use run_shell_command() instead.")
+        raise ProgramError("This function is only for non-shell programs, "
+                           "use run_shell_command() instead.")
     fullcmd = find_program(program)
     if not fullcmd:
         raise ProgramError("Program %s was not found" % program)
@@ -277,7 +274,7 @@ def run_program(program, args=None, **subprocess_kwargs):
     for stream in ['stdin', 'stdout', 'stderr']:
         subprocess_kwargs.setdefault(stream, subprocess.PIPE)
     subprocess_kwargs = alter_subprocess_kwargs_by_platform(
-            **subprocess_kwargs)
+        **subprocess_kwargs)
     return subprocess.Popen(fullcmd, **subprocess_kwargs)
 
 
@@ -659,7 +656,7 @@ def python_script_exists(package=None, module=None):
     else:
         spec = importlib.util.find_spec(package)
         if spec:
-            path = osp.join(spec.origin, module)+'.py'
+            path = osp.join(spec.origin, module) + '.py'
         else:
             path = None
     if path:
@@ -689,7 +686,7 @@ def shell_split(text):
     function (see standard library `shlex`) except that it is supporting
     unicode strings (shlex does not support unicode until Python 2.7.3).
     """
-    assert is_text_string(text)  # in case a QString is passed...
+    assert isinstance(text, str)  # in case a QString is passed...
     pattern = r'(\s+|(?<!\\)".*?(?<!\\)"|(?<!\\)\'.*?(?<!\\)\')'
     out = []
     for token in re.split(pattern, text):
@@ -747,6 +744,15 @@ def run_python_script_in_terminal(fname, wdir, args, interact, debug,
         if wdir is not None:
             # wdir can come with / as os.sep, so we need to take care of it.
             wdir = wdir.replace('/', '\\')
+        
+        if osp.splitdrive(wdir)[0].startswith("\\\\"): #UNC paths start with \\
+            from qtpy.QtWidgets import QMessageBox
+            from spyder.config.base import _
+            QMessageBox.critical(None, _('Run'),
+                                 _("External terminal does not support a UNC "
+                                   "file path as the working directory."),
+                                 QMessageBox.Ok)
+            return
 
         # python_exe must be quoted in case it has spaces
         cmd = f'start cmd.exe /K ""{executable}" '
@@ -796,6 +802,29 @@ def run_python_script_in_terminal(fname, wdir, args, interact, debug,
         thread.start()
     else:
         raise NotImplementedError
+
+
+def check_version_range(module_version, version_range):
+    """
+    Check if a module's version lies in `version_range`.
+    """
+    if ';' in version_range:
+        versions = version_range.split(';')
+    else:
+        versions = [version_range]
+
+    output = True
+    for _ver in versions:
+        match = re.search(r'[0-9]', _ver)
+        assert match is not None, "Invalid version number"
+        symb = _ver[:match.start()]
+        if not symb:
+            symb = '='
+        assert symb in ('>=', '>', '=', '<', '<='),\
+            "Invalid version condition '%s'" % symb
+        ver = _ver[match.start():]
+        output = output and check_version(module_version, ver, symb)
+    return output
 
 
 def check_version(actver, version, cmp_op):
@@ -924,23 +953,7 @@ def is_module_installed(module_name, version=None, interpreter=None,
     if version is None:
         return True
     else:
-        if ';' in version:
-            versions = version.split(';')
-        else:
-            versions = [version]
-
-        output = True
-        for _ver in versions:
-            match = re.search(r'[0-9]', _ver)
-            assert match is not None, "Invalid version number"
-            symb = _ver[:match.start()]
-            if not symb:
-                symb = '='
-            assert symb in ('>=', '>', '=', '<', '<='),\
-                "Invalid version condition '%s'" % symb
-            ver = _ver[match.start():]
-            output = output and check_version(module_version, ver, symb)
-        return output
+        return check_version_range(module_version, version)
 
 
 def is_python_interpreter_valid_name(filename):
@@ -960,7 +973,7 @@ def is_python_interpreter(filename):
     real_filename = os.path.realpath(filename)  # To follow symlink if existent
 
     if (not osp.isfile(real_filename) or
-        not is_python_interpreter_valid_name(real_filename)):
+            not is_python_interpreter_valid_name(real_filename)):
         return False
 
     # File exists and has valid name
@@ -1006,7 +1019,7 @@ def check_python_help(filename):
     try:
         proc = run_program(filename, ['-c', 'import this'], env={})
         stdout, _ = proc.communicate()
-        stdout = to_text_string(stdout)
+        stdout = str(stdout)
         valid_lines = [
             'Beautiful is better than ugly.',
             'Explicit is better than implicit.',
@@ -1051,7 +1064,12 @@ def get_interpreter_info(path):
     """Return version information of the selected Python interpreter."""
     try:
         out, __ = run_program(path, ['-V']).communicate()
-        out = out.decode()
+        out = out.decode().strip()
+
+        # This is necessary to prevent showing unexpected output.
+        # See spyder-ide/spyder#19000
+        if not re.search(r'^Python \d+\.\d+\.\d+$', out):
+            out = ''
     except Exception:
         out = ''
     return out.strip()

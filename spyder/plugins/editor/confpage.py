@@ -48,6 +48,8 @@ class EditorConfigPage(PluginConfigPage, SpyderConfigurationObserver):
                                      'indent_guides')
         showcodefolding_box = newcb(_("Show code folding"), 'code_folding')
         linenumbers_box = newcb(_("Show line numbers"), 'line_numbers')
+        breakpoints_box = newcb(_("Show breakpoints"), 'breakpoints_panel',
+                                section='debugger')
         blanks_box = newcb(_("Show blank spaces"), 'blank_spaces')
         currentline_box = newcb(_("Highlight current line"),
                                 'highlight_current_line')
@@ -85,6 +87,7 @@ class EditorConfigPage(PluginConfigPage, SpyderConfigurationObserver):
         display_layout.addWidget(showindentguides_box)
         display_layout.addWidget(showcodefolding_box)
         display_layout.addWidget(linenumbers_box)
+        display_layout.addWidget(breakpoints_box)
         display_layout.addWidget(blanks_box)
         display_layout.addWidget(currentline_box)
         display_layout.addWidget(currentcell_box)
@@ -205,8 +208,10 @@ class EditorConfigPage(PluginConfigPage, SpyderConfigurationObserver):
         # --- Run code tab ---
         saveall_box = newcb(_("Save all files before running script"),
                             'save_all_before_run')
-        focus_box = newcb(_("Maintain focus in the Editor after running cells "
-                            "or selections"), 'focus_to_editor')
+        focus_box = newcb(
+            _("Maintain focus in the editor after running or debugging code"),
+            'focus_to_editor'
+        )
         run_cell_box = newcb(_("Copy full cell contents to the console when "
                                "running code cells"), 'run_cell_copy')
 

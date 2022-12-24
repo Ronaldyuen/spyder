@@ -120,11 +120,6 @@ class Projects(SpyderDockablePlugin):
         between projects (signature 2).
     """
 
-    sig_pythonpath_changed = Signal()
-    """
-    This signal is emitted when the Python path has changed.
-    """
-
     def __init__(self, parent=None, configuration=None):
         """Initialization."""
         super().__init__(parent, configuration)
@@ -167,14 +162,12 @@ class Projects(SpyderDockablePlugin):
 
         if self.main:
             widget.sig_open_file_requested.connect(self.main.open_file)
-            self.main.project_path = self.get_pythonpath(at_start=True)
             self.sig_project_loaded.connect(
                 lambda v: self.main.set_window_title())
             self.sig_project_closed.connect(
                 lambda v: self.main.set_window_title())
             self.main.restore_scrollbar_position.connect(
                 self.restore_scrollbar_position)
-            self.sig_pythonpath_changed.connect(self.main.pythonpath_changed)
 
         self.register_project_type(self, EmptyProject)
         self.setup()
@@ -392,10 +385,7 @@ class Projects(SpyderDockablePlugin):
     def unmaximize(self):
         """Unmaximize the currently maximized plugin, if not self."""
         if self.main:
-            if (self.main.last_plugin is not None and
-                    self.main.last_plugin._ismaximized and
-                    self.main.last_plugin is not self):
-                self.main.maximize_dockwidget()
+            self.sig_unmaximize_plugin_requested[object].emit(self)
 
     def build_opener(self, project):
         """Build function opening passed project"""
@@ -436,6 +426,7 @@ class Projects(SpyderDockablePlugin):
         project_type = data.get("project_type", EmptyProject.ID)
 
         if result:
+            logger.debug(f'Creating a project at {root_path}')
             self._create_project(root_path, project_type_id=project_type)
             dlg.close()
 
@@ -532,7 +523,6 @@ class Projects(SpyderDockablePlugin):
             self.sig_project_loaded.emit(workdir)
         else:
             self.sig_project_loaded.emit(path)
-        self.sig_pythonpath_changed.emit()
         self.watcher.start(path)
 
         if restart_consoles:
@@ -565,7 +555,6 @@ class Projects(SpyderDockablePlugin):
 
             self.sig_project_closed.emit(path)
             self.sig_project_closed[bool].emit(True)
-            self.sig_pythonpath_changed.emit()
 
             # Hide pane.
             self.set_conf('visible_if_project_open',
@@ -671,18 +660,6 @@ class Projects(SpyderDockablePlugin):
         if self.current_active_project:
             active_project_path = self.current_active_project.root_path
         return active_project_path
-
-    def get_pythonpath(self, at_start=False):
-        """Get project path as a list to be added to PYTHONPATH"""
-        if at_start:
-            current_path = self.get_conf('current_project_path',
-                                         default=None)
-        else:
-            current_path = self.get_active_project_path()
-        if current_path is None:
-            return []
-        else:
-            return [current_path]
 
     def get_last_working_dir(self):
         """Get the path of the last working directory"""
@@ -940,11 +917,11 @@ class Projects(SpyderDockablePlugin):
 
             # This is necessary to catch an error for projects created in
             # Spyder 4 or older versions.
-            # Fixes spyder-ide/spyder17097
+            # Fixes spyder-ide/spyder#17097
             try:
                 project_type_id = config[WORKSPACE].get(
                     "project_type", EmptyProject.ID)
-            except KeyError:
+            except Exception:
                 pass
 
         EmptyProject._PARENT_PLUGIN = self
@@ -1017,6 +994,8 @@ class Projects(SpyderDockablePlugin):
 
     def _run_file_in_ipyconsole(self, fname):
         self.ipyconsole.run_script(
-            fname, osp.dirname(fname), '', False, False, False, True,
-            False
+            filename=fname,
+            wdir=osp.dirname(fname),
+            current_client=False,
+            clear_variables=True
         )

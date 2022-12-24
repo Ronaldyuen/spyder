@@ -9,7 +9,7 @@ Variable Explorer Main Plugin Widget.
 """
 
 # Third party imports
-from qtpy.QtCore import QTimer, Signal, Slot
+from qtpy.QtCore import QTimer, Slot
 from qtpy.QtWidgets import QAction
 
 # Local imports
@@ -96,9 +96,6 @@ class VariableExplorerWidget(ShellConnectMainWidget):
     # Other class constants
     INITIAL_FREE_MEMORY_TIME_TRIGGER = 60 * 1000  # ms
     SECONDARY_FREE_MEMORY_TIME_TRIGGER = 180 * 1000  # ms
-
-    # Signals
-    sig_free_memory_requested = Signal()
 
     def __init__(self, name=None, plugin=None, parent=None):
         super().__init__(name, plugin, parent)
@@ -415,45 +412,31 @@ class VariableExplorerWidget(ShellConnectMainWidget):
     def create_new_widget(self, shellwidget):
         """Create new NamespaceBrowser."""
         nsb = NamespaceBrowser(self)
-        nsb.sig_hide_finder_requested.connect(
-            self.hide_finder)
-        nsb.sig_free_memory_requested.connect(
-            self.free_memory)
-        nsb.sig_start_spinner_requested.connect(
-            self.start_spinner)
-        nsb.sig_stop_spinner_requested.connect(
-            self.stop_spinner)
+        nsb.sig_hide_finder_requested.connect(self.hide_finder)
+        nsb.sig_free_memory_requested.connect(self.free_memory)
+        nsb.sig_start_spinner_requested.connect(self.start_spinner)
+        nsb.sig_stop_spinner_requested.connect(self.stop_spinner)
         nsb.set_shellwidget(shellwidget)
         nsb.setup()
         self._set_actions_and_menus(nsb)
 
         # To update the Variable Explorer after execution
-        shellwidget.executed.connect(
-            nsb.refresh_namespacebrowser)
-        shellwidget.sig_kernel_started.connect(
-            nsb.on_kernel_started)
-        shellwidget.sig_kernel_reset.connect(
-            nsb.on_kernel_started)
-
+        shellwidget.executed.connect(nsb.refresh_namespacebrowser)
+        shellwidget.sig_config_spyder_kernel.connect(nsb.setup_kernel)
         return nsb
 
     def close_widget(self, nsb):
         """Close NamespaceBrowser."""
-        nsb.sig_hide_finder_requested.disconnect(
-            self.hide_finder)
-        nsb.sig_free_memory_requested.disconnect(
-            self.free_memory)
-        nsb.sig_start_spinner_requested.disconnect(
-            self.start_spinner)
-        nsb.sig_stop_spinner_requested.disconnect(
-            self.stop_spinner)
-        nsb.shellwidget.executed.disconnect(
-            nsb.refresh_namespacebrowser)
-        nsb.shellwidget.sig_kernel_started.disconnect(
-            nsb.on_kernel_started)
-        nsb.shellwidget.sig_kernel_reset.disconnect(
-            nsb.on_kernel_started)
+        nsb.sig_hide_finder_requested.disconnect(self.hide_finder)
+        nsb.sig_free_memory_requested.disconnect(self.free_memory)
+        nsb.sig_start_spinner_requested.disconnect(self.start_spinner)
+        nsb.sig_stop_spinner_requested.disconnect(self.stop_spinner)
+        nsb.shellwidget.executed.disconnect(nsb.refresh_namespacebrowser)
+        nsb.shellwidget.sig_config_spyder_kernel.disconnect(
+            nsb.setup_kernel)
+
         nsb.close()
+        nsb.setParent(None)
 
     def import_data(self, filenames=None):
         """

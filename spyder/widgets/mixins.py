@@ -465,7 +465,7 @@ class BaseEditMixin(object):
         language = getattr(self, 'language', language).lower()
         signature_or_text = signature_or_text.replace('\\*', '*')
 
-        # Remove special symbols that could itefere with ''.format
+        # Remove special symbols that could interfere with ''.format
         signature_or_text = signature_or_text.replace('{', '&#123;')
         signature_or_text = signature_or_text.replace('}', '&#125;')
 
@@ -521,6 +521,8 @@ class BaseEditMixin(object):
             else:
                 signature = '\n'.join(lines[:i])
                 extra_text = '\n'.join(lines[i:])
+                if extra_text == '\n':
+                    extra_text = None
 
             if signature:
                 new_signature = self._format_signature(
@@ -1081,7 +1083,7 @@ class BaseEditMixin(object):
         startpos = cursor.selectionStart()
 
         # Find a valid Python variable name
-        if valid_python_variable:
+        if valid_python_variable and not completion:
             match = re.findall(r'([^\d\W]\w*)', text, re.UNICODE)
             if not match:
                 # This is assumed in several places of our codebase,

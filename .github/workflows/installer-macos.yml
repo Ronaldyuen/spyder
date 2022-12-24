@@ -10,7 +10,9 @@ on:
       - '**.sh'
       - '!**.md'
       - '!installers/Windows/**'
+      - '!installers-conda/**'
       - '!.github/workflows/installer-win.yml'
+      - '!.github/workflows/installers-conda.yml'
 
   release:
     types:
@@ -21,7 +23,7 @@ name: Create macOS App Bundle and DMG
 jobs:
   matrix_prep:
     name: Determine Build Matrix
-    runs-on: macos-10.15
+    runs-on: macos-11
     outputs:
       build_type: ${{ steps.set-matrix.outputs.build_type }}
     steps:
@@ -35,7 +37,7 @@ jobs:
         echo "::set-output name=build_type::{'build_type':$(echo $build_type)}"
   build:
     name: macOS App Bundle
-    runs-on: macos-10.15
+    runs-on: macos-11
     needs: matrix_prep
     strategy:
       matrix: ${{fromJson(needs.matrix_prep.outputs.build_type)}}
@@ -58,7 +60,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9.5'
+          python-version: '3.9.14'
           architecture: 'x64'
       - name: Install Dependencies
         run: |
@@ -91,7 +93,7 @@ jobs:
           pil=$(${pythonLocation} -c "import PIL, os; print(os.path.dirname(PIL.__file__))")
           rm -v ${DISTDIR}/Spyder.app/Contents/Frameworks/liblzma.5.dylib
           cp -v ${pil}/.dylibs/liblzma.5.dylib ${DISTDIR}/Spyder.app/Contents/Frameworks/
-          ./codesign.sh -a "${DISTDIR}/Spyder.app"
+          ./codesign.sh "${DISTDIR}/Spyder.app"
       - name: Test Application Bundle
         run: ./test_app.sh -t 60 -d 10 ${DISTDIR}
       - name: Build Disk Image

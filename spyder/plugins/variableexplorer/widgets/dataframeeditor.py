@@ -1877,6 +1877,7 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
         self._autosized_cols = set()
         self._resizeAllColumnsToContents()
 
+    @Slot()
     def change_format(self):
         """
         Ask user for display format for floats and use it.
@@ -1948,6 +1949,7 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
         self.table_index.model().fetch_more()
 
     '''
+    @Slot()
     def resize_to_contents(self):
         QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
         self.dataTable.resizeColumnsToContents()
