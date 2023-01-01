@@ -1813,9 +1813,8 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
         index_column = self.dataTable.rect().topLeft().x()
         start = col = self.dataTable.columnAt(index_column)
         width = self._model.shape[1]
-        # end = self.dataTable.columnAt(self.dataTable.rect().bottomRight().x())
-        end = width
-        # end = width if end == -1 else end + 1
+        end = self.dataTable.columnAt(self.dataTable.rect().bottomRight().x())
+        end = width if end == -1 else end + 1
         if self._max_autosize_ms is None:
             max_col_ms = None
         else:
@@ -2066,6 +2065,10 @@ def test():
     df1 = df1.join([DataFrame([{'F': [1, 2, 3, 4]}])])
     df1['super_super_super_unacceptable_long_column_name_that_should_not_happen'] = df1['Test']
     # df1.set_index('date_time', inplace=True)
+
+    # add more columns if needed
+    # test = [df1] * 30
+    # df1 = pd.concat(test, axis=1)
 
     _test_wrapper(_test_edit, df1, is_profiling=True)
     # from pandas import MultiIndex
