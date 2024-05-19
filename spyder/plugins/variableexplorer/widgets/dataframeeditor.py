@@ -62,6 +62,12 @@ from spyder.utils.qthelpers import (add_actions, create_action,
 from spyder.plugins.variableexplorer.widgets.arrayeditor import get_idx_rect
 from spyder.plugins.variableexplorer.widgets.basedialog import BaseDialog
 
+from qtpy.QtWidgets import QHeaderView, QLabel
+from PyQt5.QtCore import QRect
+from typing import Callable
+import traceback
+import collections
+
 # Supported Numbers and complex numbers
 REAL_NUMBER_TYPES = (float, int, np.int64, np.int32)
 COMPLEX_NUMBER_TYPES = (complex, np.complex64, np.complex128)
@@ -72,6 +78,7 @@ _bool_false = ['false', 'f', '0', '0.', '0.0', ' ']
 DEFAULT_FORMAT = '%.6g'
 
 # Limit at which dataframe is considered so large that it is loaded on demand
+# TODO: careful
 LARGE_SIZE = 5e5
 LARGE_NROWS = 1e5
 LARGE_COLS = 60
@@ -89,6 +96,108 @@ BACKGROUND_INDEX_ALPHA = 0.8
 BACKGROUND_STRING_ALPHA = 0.05
 BACKGROUND_MISC_ALPHA = 0.3
 
+""" API Function dictionary
+sizeHint: The default implementation of sizeHint() returns an invalid size if there is no layout for this widget
+          and returns the layout's preferred size otherwise.
+updateGeometries: Updates the geometry of the child widgets of the view. called when sizeHint etc. is called
+setViewportMargins: Sets the margins around the scrolling area to left, top, right and bottom. (for locked rows and columns)
+sectionPosition: first visible item's top-left corner to the top-left corner of the item with logicalIndex
+offset: header's left most visible pixel position
+beginResetModel: When a model is reset it means that any previous data reported from the model is now invalid and has to be queried for again. 
+                This also means that the current item and any selected items will become invalid.
+"""
+
+
+##### Custome Header ######
+# Source: https://stackoverflow.com/questions/44343738/how-to-inject-widgets-between-qheaderview-and-qtableview
+class CustomHeaderView(QHeaderView):
+    def __init__(self, parent):
+        super().__init__(Qt.Horizontal, parent)
+        self._is_initialized = False
+        # since QLineEdit().sizeHint().height = 22
+        self.CUSTOM_HEADER_HEIGHT = 22
+
+    def sizeHint(self):
+        size = super().sizeHint()
+        size.setHeight(size.height() + self.CUSTOM_HEADER_HEIGHT)
+        return size
+
+    def updateGeometries(self):
+        super().updateGeometries()
+        self.setViewportMargins(0, 0, 0, self.CUSTOM_HEADER_HEIGHT)
+        self.adjustPositions()
+
+
+class CustomHeaderViewIndex(CustomHeaderView):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._label = None
+        self.sectionResized.connect(self.adjustPositions)
+
+    def setQLabel(self, text):
+        if not self._is_initialized:
+            self._is_initialized = True
+            self._label = QLabel(self.parent())
+            self._label.setStyleSheet('color: blue')
+            self._label.setAlignment(Qt.AlignCenter | Qt.AlignVCenter)
+            self.adjustPositions()
+        self._label.setText(text)
+
+    def adjustPositions(self):
+        if self._is_initialized:
+            x = self.sectionPosition(0) - self.offset()
+            # check the original header height
+            y = super(CustomHeaderView, self).sizeHint().height()
+            self._label.setGeometry(QRect(x, y, self.sectionSize(0), self.CUSTOM_HEADER_HEIGHT))
+
+    def sizeHint(self):
+        size = super().sizeHint()
+        if self._is_initialized:
+            label_width = self._label.sizeHint().width()
+            size.setWidth(label_width)
+        return size
+
+
+class CustomHeaderViewEditor(CustomHeaderView):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._editors = []
+        self.sectionResized.connect(self.adjustPositions)
+        parent.horizontalScrollBar().valueChanged.connect(self.adjustPositions)
+
+    # connected with sectionResized and horizontalScrollBar
+    def adjustPositions(self):
+        for index, editor in enumerate(self._editors):
+            # offset: header's left most visible pixel position
+            x = self.sectionPosition(index) - self.offset()
+            # check the original header height
+            y = super(CustomHeaderView, self).sizeHint().height()
+            # move to x,y position
+            # coordinates is left and top most of the structure
+            editor.move(x, y)
+            editor.resize(self.sectionSize(index), self.CUSTOM_HEADER_HEIGHT)
+
+    def setFilterBoxes(self, count, filter_action_func: Callable):
+        # create only once
+        if not self._is_initialized:
+            for index in range(count):
+                editor = QLineEdit(self.parent())
+                editor.setPlaceholderText(str(index))
+                # pressing enter at filter box
+                editor.returnPressed.connect(filter_action_func)
+                self._editors.append(editor)
+            self._is_initialized = True
+            self.adjustPositions()
+
+    def getText(self):
+        return [self._editors[index].text() for index in range(0, len(self._editors))]
+
+    def clearFilterText(self):
+        for index in range(0, len(self._editors)):
+            self._editors[index].setText('')
+
+
+##### Custome Header Done ######
 
 def bool_false_check(value):
     """
@@ -107,6 +216,45 @@ def global_max(col_vals, index):
     max_col, min_col = zip(*col_vals_without_None)
     return max(max_col), min(min_col)
 
+
+_INDEX_TRACKER_NAME = '__INDEX_TRACKER'
+_ORIGINAL_DF_STR = 'self.model_extra.original_df'
+
+class DataFrameModelExtra:
+    """ An extra column of index is set to dataframe, it would be removed before display
+        it serves the purpose of selecting the exact row when reset happens,
+        it is set to
+    """
+
+    def __init__(self, df: pd.DataFrame):
+        self.original_df = df
+
+        self.LARGE_SIZE = 5e5
+        self.LARGE_NROWS = 1e5
+        self.LARGE_COLS = 60
+        self.ROWS_TO_LOAD = 500
+        self.COLS_TO_LOAD = 20  # TODO: careful dataFrame.shape[1]
+        self.UNIQUE_ITEM_THRESHOLD = 15
+
+        # dynamic items
+        self.idx_tracker: pd.Series = None
+        self.filtered_text = ''
+        self.unique_items_col = [None] * df.shape[1]
+
+    def set_index_tracker(self, df, is_reset):
+        if self.idx_tracker is None or is_reset:
+            df[_INDEX_TRACKER_NAME] = range(len(df))
+        else:
+            # TODO: when index is duplicated,  set directly would not work
+            df[_INDEX_TRACKER_NAME] = self.idx_tracker.values
+
+    def remove_index_tracker(self, df, is_update):
+        if is_update:
+            self.idx_tracker = df[_INDEX_TRACKER_NAME]
+        df.drop(_INDEX_TRACKER_NAME, axis=1, inplace=True)
+
+    def get_idx_tracker(self):
+        return self.idx_tracker
 
 class DataFrameModel(QAbstractTableModel):
     """
@@ -128,6 +276,8 @@ class DataFrameModel(QAbstractTableModel):
         self._format = format
         self.complex_intran = None
         self.display_error_idxs = []
+        self.UNIQUE_ITEM_THRESHOLD = 15
+        self.model_extra = DataFrameModelExtra(dataFrame)
 
         self.total_rows = self.df.shape[0]
         self.total_cols = self.df.shape[1]
@@ -135,6 +285,7 @@ class DataFrameModel(QAbstractTableModel):
 
         self.max_min_col = None
         if size < LARGE_SIZE:
+            self.unique_col_update()
             self.max_min_col_update()
             self.colum_avg_enabled = True
             self.bgcolor_enabled = True
@@ -147,17 +298,18 @@ class DataFrameModel(QAbstractTableModel):
         # Use paging when the total size, number of rows or number of
         # columns is too large
         if size > LARGE_SIZE:
-            self.rows_loaded = ROWS_TO_LOAD
-            self.cols_loaded = COLS_TO_LOAD
+            self.rows_loaded = self.model_extra.ROWS_TO_LOAD
+            self.cols_loaded = self.model_extra.COLS_TO_LOAD
         else:
             if self.total_rows > LARGE_NROWS:
-                self.rows_loaded = ROWS_TO_LOAD
+                self.rows_loaded = self.model_extra.ROWS_TO_LOAD
             else:
                 self.rows_loaded = self.total_rows
             if self.total_cols > LARGE_COLS:
                 self.cols_loaded = COLS_TO_LOAD
             else:
                 self.cols_loaded = self.total_cols
+
 
     def _axis(self, axis):
         """
@@ -228,6 +380,23 @@ class DataFrameModel(QAbstractTableModel):
         if ax.name:
             return ax.name
 
+    def unique_col_update(self):
+        """return list of sorted unique values of each column, None for unhashable values"""
+        if self.df.shape[0] == 0:  # If no rows to compute max/min then return
+            return
+        for idx, col in enumerate(self.df):
+            unique_items = None
+            try:
+                unique_items = self.df[col].unique().tolist()
+                if len(unique_items) > self.UNIQUE_ITEM_THRESHOLD:
+                    unique_items = None
+                else:
+                    unique_items = sorted(unique_items)
+            except (TypeError, AttributeError):
+                # unhashable values OR mixed data type could not be sorted
+                pass
+            self.model_extra.unique_items_col[idx] = unique_items
+
     def max_min_col_update(self):
         """
         Determines the maximum and minimum number in each column.
@@ -241,10 +410,16 @@ class DataFrameModel(QAbstractTableModel):
         minimum of the absolute values. If vmax equals vmin, then vmin is
         decreased by one.
         """
-        if self.df.shape[0] == 0: # If no rows to compute max/min then return
+        if self.df.shape[0] == 0:  # If no rows to compute max/min then return
             return
-        self.max_min_col = []
-        for __, col in self.df.items():
+        self.max_min_col = [None] * self.df.shape[1]
+        for idx, (_, col) in enumerate(self.df.items()):
+            vmax = vmin = None  # set default values
+            unique_items = self.model_extra.unique_items_col[idx]  # check unique items
+            if unique_items is not None:
+                # set min_max to None (no color) for single value column
+                if len(unique_items) == 1:
+                    continue
             # This is necessary to catch an error in Pandas when computing
             # the maximum of a column.
             # Fixes spyder-ide/spyder#17145
@@ -256,15 +431,24 @@ class DataFrameModel(QAbstractTableModel):
                     else:
                         vmax = col.abs().max(skipna=True)
                         vmin = col.abs().min(skipna=True)
-                    if vmax != vmin:
-                        max_min = [vmax, vmin]
-                    else:
-                        max_min = [vmax, vmin - 1]
                 else:
-                    max_min = None
+                    if unique_items is not None:
+                        if len(unique_items) < self.UNIQUE_ITEM_THRESHOLD:
+                            vmax = len(unique_items) - 1
+                            vmin = 0
             except TypeError:
-                max_min = None
-            self.max_min_col.append(max_min)
+                # nothing should go wrong, just keeping same indentation as original
+                continue
+            if vmax is not None and vmin is not None:
+                if vmax != vmin:
+                    max_min = [vmax, vmin]
+                else:
+                    # reach here iff only column only contains one value and nan
+                    max_min = [vmax, vmin - 1]
+                    # if its a large float, then we need other method to set a min
+                    if max_min[0] == max_min[1]:
+                        max_min[1] = max_min[0] / 10
+                self.max_min_col[idx] = max_min
 
     def get_format(self):
         """Return current format"""
@@ -290,6 +474,83 @@ class DataFrameModel(QAbstractTableModel):
             self.return_max = global_max
         self.reset()
 
+    def set_filter(self, filter_list, df_name):
+        """filter self.df by the filter_list given
+        just like sort, modify self.df and then reset"""
+        filter_per_column = []
+        for idx, filter_str in enumerate(filter_list):
+            result = self._get_query_list(filter_str, self.model_extra.original_df.columns[idx])
+            if result is not None:
+                filter_per_column.append(result)
+        query_text = '&'.join(filter_per_column)
+        if query_text == '':
+            # empty filter
+            self.df = self.model_extra.original_df.copy()
+            self.model_extra.filtered_text = ''
+            self.model_extra.idx_tracker = None
+        else:
+            self.model_extra.set_index_tracker(self.model_extra.original_df, is_reset=True)
+            exec_text = f'self.df = self.model_extra.original_df[{query_text}].copy()'
+            try:
+                exec(exec_text)
+            except:
+                QMessageBox.critical(self.dialog, _("Error"), traceback.format_exc())
+                self.model_extra.remove_index_tracker(self.original_df, is_update=False)
+                return
+            self.model_extra.filtered_text = f'{df_name}[{query_text}]'
+            self.model_extra.remove_index_tracker(self.model_extra.original_df, is_update=False)
+            self.model_extra.remove_index_tracker(self.df, is_update=True)
+        # reset total rows
+        self.total_rows = self.df.shape[0]
+        self.unique_col_update()
+        self.max_min_col_update()
+        self.reset()
+
+    @staticmethod
+    def _get_query_list(filter_str, column_name):
+        """wrap filter_str with df name and column name with special characters handling
+
+        (Assume "|" and "&" not used other than separator)
+        Multiple logical statements within a editing cell (column) could be separated by "|" OR "&" which represent union OR intersection
+        They could not be present at the same time
+        Each statement should START with either the logical operators: > < !=  ==
+        OR the following definitions:
+        ^ : replace by .str.startswith
+        ISNAN: replace by pd.isnull
+
+        If none of above is detected, will use == by default
+
+        Example of filter_str: 1|2  >5&<10  ^"E"
+        """
+
+        def _get_handled_logic(logic_str, column_name):
+            logic_str = logic_str.strip()
+            if logic_str.startswith((">", "<", "!=", "==")):
+                pass
+            elif logic_str.startswith("^"):
+                logic_str = ".str.startswith({})".format(logic_str[1:])
+            elif logic_str.startswith("+"):
+                logic_str = ".str.contains({})".format(logic_str[1:])
+            elif logic_str == "ISNAN":
+                return f'(pd.isnull({_ORIGINAL_DF_STR}["{column_name}"]))'
+            elif logic_str == "!ISNAN":
+                return f'(~pd.isnull({_ORIGINAL_DF_STR}["{column_name}"]))'
+            else:
+                # default
+                logic_str = "==" + logic_str
+            return f'({_ORIGINAL_DF_STR}["{column_name}"]{logic_str})'
+
+        #####
+        if filter_str == '':
+            return
+        assert (not ("|" in filter_str and "&" in filter_str))
+        for i in ["|", "&"]:
+            if i in filter_str:
+                multiple_logic = [_get_handled_logic(filter_str, column_name) for filter_str in filter_str.split(i)]
+                return i.join(multiple_logic)
+        else:
+            return _get_handled_logic(filter_str, column_name)
+
     def get_bgcolor(self, index):
         """Background color depending on value."""
         column = index.column()
@@ -309,6 +570,13 @@ class DataFrameModel(QAbstractTableModel):
                 color_func = abs
             else:
                 color_func = float
+                if self.model_extra.unique_items_col[column] is not None:
+                    try:
+                        # transform the value to index of unique items
+                        value = self.model_extra.unique_items_col[column].index(value)
+                    except ValueError:
+                        #  datetime are transformed when called by series.unique(), cannot match with unique_items_col
+                        return
             vmax, vmin = self.return_max(self.max_min_col, column)
 
             # This is necessary to catch an error in Pandas when computing
@@ -394,6 +662,7 @@ class DataFrameModel(QAbstractTableModel):
                                      "TypeError error: no ordering "
                                      "relation is defined for complex numbers")
                 return False
+        self.model_extra.set_index_tracker(self.df, is_reset=False)
         try:
             ascending = order == Qt.AscendingOrder
             if column >= 0:
@@ -429,6 +698,29 @@ class DataFrameModel(QAbstractTableModel):
         self.reset()
         return True
 
+    def find_next_value_same_col(self, cur_row, cur_col, is_direction_up):
+        cur_val = self.get_value(cur_row, cur_col)
+        selected_col = self.df.iloc[:, cur_col]
+        if not isinstance(cur_val, str) and isinstance(cur_val, collections.Iterable):
+            # do not compare if it is a list/dict/np.array
+            index_candidates = np.array([])
+        else:
+            # check nan
+            if pd.isna(cur_val):
+                index_candidates = np.where(~pd.isnull(selected_col))[0]
+            else:
+                index_candidates = np.where(selected_col != cur_val)[0]
+        if is_direction_up:
+            try:
+                return index_candidates[index_candidates < cur_row][-1]
+            except IndexError:
+                return 0
+        else:
+            try:
+                return index_candidates[index_candidates > cur_row][0]
+            except IndexError:
+                return self.df.shape[0] - 1
+
     def flags(self, index):
         """Set flags"""
         return Qt.ItemFlags(int(QAbstractTableModel.flags(self, index) |
@@ -459,7 +751,11 @@ class DataFrameModel(QAbstractTableModel):
             if (isinstance(current_value, supported_types) or
                     is_text_string(current_value)):
                 try:
-                    self.df.iloc[row, column] = current_value.__class__(val)
+                    # skip updating if there is no value changes, also check value is nan
+                    val_to_set = current_value.__class__(val)
+                    if val_to_set == current_value or ((val_to_set != val_to_set) and (current_value != current_value)):
+                        return True
+                    self.df.iloc[row, column] = val_to_set
                 except (ValueError, OverflowError) as e:
                     QMessageBox.critical(self.dialog, "Error",
                                          str(type(e).__name__) + ": " + str(e))
@@ -555,11 +851,12 @@ class DataFrameView(QTableView, SpyderConfigurationAccessor):
         self.sort_old = [None]
         self.header_class = header
         self.header_class.sectionClicked.connect(self.sortByColumn)
-        self.menu = self.setup_menu()
+        self.menu = self.setup_menu(parent)
         self.config_shortcut(self.copy, 'copy', self)
         self.horizontalScrollBar().valueChanged.connect(
             self._load_more_columns)
         self.verticalScrollBar().valueChanged.connect(self._load_more_rows)
+        self.selectionModel().selectionChanged.connect(parent._top_left_label_update)
 
     def _load_more_columns(self, value):
         """Load more columns to display."""
@@ -585,14 +882,63 @@ class DataFrameView(QTableView, SpyderConfigurationAccessor):
             if rows and value == self.verticalScrollBar().maximum():
                 self.model().fetch_more(rows=rows)
                 self.sig_fetch_more_rows.emit()
+                """
             if columns and value == self.horizontalScrollBar().maximum():
                 self.model().fetch_more(columns=columns)
                 self.sig_fetch_more_columns.emit()
+                """
 
         except NameError:
             # Needed to handle a NameError while fetching data when closing
             # See spyder-ide/spyder#7880.
             pass
+
+    def keyPressEvent(self, event):
+        modifiers = QApplication.keyboardModifiers()
+        current_row = self.selectionModel().currentIndex().row()
+        current_col = self.selectionModel().currentIndex().column()
+        # if pressed control
+        if modifiers == Qt.ControlModifier:
+            if event.key() == Qt.Key_Up:
+                self.scroll_to_and_select(0, current_col)
+            if event.key() == Qt.Key_Left:
+                self.scroll_to_and_select(current_row, 0)
+            if event.key() == Qt.Key_Down:
+                self.scroll_to_and_select(self.model().total_rows - 1, current_col)
+            if event.key() == Qt.Key_Right:
+                self.scroll_to_and_select(current_row, self.model().total_cols - 1)
+            if event.key() in [Qt.Key_Up, Qt.Key_Left, Qt.Key_Down, Qt.Key_Right]:
+                # override original implementation
+                return
+        elif modifiers == Qt.AltModifier:
+            if event.key() == Qt.Key_Up:
+                self.go_to_next_value_same_col(current_row, current_col, True)
+            if event.key() == Qt.Key_Down:
+                # self.scroll_to_and_select(self.model().total_rows - 1, current_col)
+                self.go_to_next_value_same_col(current_row, current_col, False)
+            if event.key() in [Qt.Key_Up, Qt.Key_Down]:
+                # override original implementation
+                return
+        super(DataFrameView, self).keyPressEvent(event)
+
+    def scroll_to_and_select(self, row, col):
+        if row > self.model().rows_loaded:
+            self.model().set_rows_to_load(row)
+            self.model().fetch_more(rows=True)
+            self.sig_fetch_more_rows.emit()
+        if col > self.model().cols_loaded:
+            self.model().set_cols_to_load(col)
+            self.model().fetch_more(columns=True)
+            self.sig_fetch_more_columns.emit()
+        # let the view update
+        QApplication.processEvents()
+        self.scrollTo(self.model().index(row, col))
+        self.selectionModel().setCurrentIndex(self.model().index(row, col), QItemSelectionModel.ClearAndSelect)
+
+    def go_to_next_value_same_col(self, cur_row, cur_col, is_direction_up):
+        """scroll to the next item in this column which value is not the same"""
+        row = self.model().find_next_value_same_col(cur_row, cur_col, is_direction_up)
+        self.scroll_to_and_select(row, cur_col)
 
     def sortByColumn(self, index):
         """Implement a column sort."""
@@ -614,17 +960,22 @@ class DataFrameView(QTableView, SpyderConfigurationAccessor):
         self.menu.popup(event.globalPos())
         event.accept()
 
-    def setup_menu(self):
+    def setup_menu(self, parent):
         """Setup context menu."""
         copy_action = create_action(self, _('Copy'),
                                     shortcut=keybinding('Copy'),
                                     icon=ima.icon('editcopy'),
                                     triggered=self.copy,
                                     context=Qt.WidgetShortcut)
+        reset_action = create_action(self, _('Reset and scroll to'),
+                                     icon=ima.icon('restore'),
+                                     triggered=parent.reset_and_scroll_to,
+                                     context=Qt.WidgetShortcut)
         functions = ((_("To bool"), bool), (_("To complex"), complex),
                      (_("To int"), int), (_("To float"), float),
                      (_("To str"), to_text_string))
         types_in_menu = [copy_action]
+        types_in_menu += [reset_action]
         for name, func in functions:
             def slot():
                 self.change_type(func)
@@ -668,6 +1019,9 @@ class DataFrameView(QTableView, SpyderConfigurationAccessor):
         output.close()
         clipboard = QApplication.clipboard()
         clipboard.setText(contents)
+
+    def get_selected_rows(self):
+        return set([x.row() for x in self.selectedIndexes()])
 
 
 class DataFrameHeaderModel(QAbstractTableModel):
@@ -929,6 +1283,7 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
         self.layout.setSpacing(0)
         self.layout.setContentsMargins(20, 20, 20, 0)
         self.setLayout(self.layout)
+        self.df_name = title if title else "df"
         if title:
             title = to_text_string(title) + " - %s" % data.__class__.__name__
         else:
@@ -993,12 +1348,18 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
         bgcolor.stateChanged.connect(self.change_bgcolor_enable)
         btn_layout.addWidget(bgcolor)
 
+        '''
         self.bgcolor_global = QCheckBox(_('Column min/max'))
         self.bgcolor_global.setChecked(self.dataModel.colum_avg_enabled)
         self.bgcolor_global.setEnabled(not self.is_series and
                                        self.dataModel.bgcolor_enabled)
         self.bgcolor_global.stateChanged.connect(self.dataModel.colum_avg)
         btn_layout.addWidget(self.bgcolor_global)
+        '''
+
+        self.textbox = QLineEdit()
+        btn_layout.addWidget(self.textbox)
+        self.textbox.setPlaceholderText('Filtered command')
 
         btn_layout.addStretch()
 
@@ -1016,7 +1377,8 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
         btn_layout.setContentsMargins(0, 16, 0, 16)
         self.layout.addLayout(btn_layout, 4, 0, 1, 2)
         self.setModel(self.dataModel)
-        self.resizeColumnsToContents()
+        # self.resizeIndexColumnAtInitialization()
+        QApplication.processEvents()
 
         format = '%' + self.get_conf('dataframe_format')
         self.dataModel.set_format(format)
@@ -1046,6 +1408,11 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
         self.table_level.setContentsMargins(0, 0, 0, 0)
         self.table_level.horizontalHeader().sectionClicked.connect(
                                                             self.sortByIndex)
+        self.custom_label_view = CustomHeaderViewIndex(self.table_level)
+        self.custom_label_view.setSectionsClickable(True)
+        self.table_level.setHorizontalHeader(self.custom_label_view)
+
+
 
     def create_table_header(self):
         """Create the QTableView that will hold the header model."""
@@ -1057,9 +1424,19 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
         self.table_header.setHorizontalScrollMode(QTableView.ScrollPerPixel)
         self.table_header.setHorizontalScrollBar(self.hscroll)
         self.table_header.setFrameStyle(QFrame.Plain)
-        self.table_header.horizontalHeader().sectionResized.connect(
-                                                        self._column_resized)
         self.table_header.setItemDelegate(QItemDelegate())
+
+        self.custom_header_view = CustomHeaderViewEditor(self.table_header)
+        # needs to set cliackable manually,  not sure what else needs to self manually when creating qheaderview class
+        # maybe check value of each field?
+        # https://github.com/spyder-ide/qtpy/blob/master/qtpy/tests/test_patch_qheaderview.py
+        self.custom_header_view.setSectionsClickable(True)
+        self.table_header.setHorizontalHeader(self.custom_header_view)
+        self.table_header.horizontalHeader().sectionResized.connect(self._column_resized)
+        # the rest are defaults
+        self.table_header.verticalHeader().hide()
+        self.table_header.setEditTriggers(QTableWidget.NoEditTriggers)
+
         self.layout.addWidget(self.table_header, 0, 1)
 
     def create_table_index(self):
@@ -1135,6 +1512,7 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
         self.table_level.verticalHeader().setFixedWidth(h_width)
         self.table_index.verticalHeader().setFixedWidth(h_width)
 
+        # last_row >= 0 for non empty dataframe
         last_row = self._model.header_shape[0] - 1
         if last_row < 0:
             hdr_height = self.table_level.horizontalHeader().height()
@@ -1142,6 +1520,7 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
             hdr_height = self.table_level.rowViewportPosition(last_row) + \
                          self.table_level.rowHeight(last_row) + \
                          self.table_level.horizontalHeader().height()
+            hdr_height = self.custom_header_view.sizeHint().height()
             # Check if the header shape has only one row (which display the
             # same info than the horizontal header).
             if last_row == 0:
@@ -1193,9 +1572,26 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
                                                             1,
                                                             self.palette()))
 
+        # setting the custom header
+        if self._model.shape[1] > 0:
+            self.custom_header_view.setFilterBoxes(self._model.shape[1], self.handleFilterActivated)
+            self.set_top_left_label(str(self._model.shape[0]))
+
         # Needs to be called after setting all table models
         if relayout:
             self._update_layout()
+
+    def _top_left_label_update(self):
+        """ shows row number if single row selected """
+        rows_selected = self.dataTable.get_selected_rows()
+        if len(rows_selected) == 1:
+            row_selected = next(iter(rows_selected))
+            self.set_top_left_label(f"{int(row_selected) + 1}/{self._model.shape[0]}")
+        else:
+            self.set_top_left_label(str(self._model.shape[0]))
+
+    def set_top_left_label(self, text):
+        self.custom_label_view.setQLabel(text)
 
     def setCurrentIndex(self, y, x):
         """Set current selection."""
@@ -1248,6 +1644,13 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
         if obj == self.dataTable and event.type() == QEvent.Resize:
             self._resizeVisibleColumnsToContents()
         return False
+
+    """ This is very important function, without this pressing enter would exit the view"""
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Enter or event.key() == Qt.Key_Return:
+            return
+        else:
+            super(DataFrameEditor, self).keyPressEvent(event)
 
     def _resizeVisibleColumnsToContents(self):
         """Resize the columns that are in the view."""
@@ -1366,6 +1769,30 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
         """Fetch more data for the index (rows)."""
         self.table_index.model().fetch_more()
 
+    def set_filter(self, filter_list):
+        self.dataModel.set_filter(filter_list, self.df_name)
+        # reset size of other views
+        self.setModel(self.dataTable.model(), relayout=False)
+        # sort with the order before filtering
+        if self.dataTable.sort_old != [None]:
+            self.dataModel.sort(*self.dataTable.sort_old)
+
+    def handleFilterActivated(self):
+        self.set_filter(self.custom_header_view.getText())
+        self.textbox.setText(self.dataModel.model_extra.filtered_text)
+
+    def reset_filter(self):
+        self.custom_header_view.clearFilterText()
+        self.handleFilterActivated()
+
+    def reset_and_scroll_to(self):
+        (row_min, row_max,
+         col_min, col_max) = get_idx_rect(self.dataTable.selectedIndexes())
+        if self.dataModel.model_extra.get_idx_tracker() is not None:
+            original_df_row = self.dataModel.model_extra.get_idx_tracker().iloc[row_min]
+            self.reset_filter()
+            self.dataTable.scroll_to_and_select(original_df_row, col_min)
+
     @Slot()
     def resize_to_contents(self):
         QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
@@ -1379,57 +1806,72 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
 #==============================================================================
 # Tests
 #==============================================================================
-def test_edit(data, title="", parent=None):
+def _test_edit(data, title="", parent=None):
     """Test subroutine"""
     dlg = DataFrameEditor(parent=parent)
 
     if dlg.setup_and_check(data, title=title):
-        dlg.exec_()
+        try:
+            dlg.exec_()
+        except Exception as e:
+            raise e
         return dlg.get_value()
     else:
         import sys
         sys.exit(1)
 
+def _test_wrapper(func, df, is_profiling=False):
+    import cProfile
+    if is_profiling:
+        pr = cProfile.Profile()
+        pr.enable()
+        func(df)
+        pr.disable()
+        # after your program ends
+        pr.print_stats(sort="calls")
+    else:
+        func(df)
+
 
 def test():
     """DataFrame editor test"""
-    from numpy import nan
 
-    if parse(pd.__version__) >= parse('2.0.0'):
-        from pandas.testing import assert_frame_equal, assert_series_equal
-    else:
-        from pandas.util.testing import assert_frame_equal, assert_series_equal
+    app = qapplication()  # analysis:ignore
 
-    app = qapplication()                  # analysis:ignore
+    import numpy as np
+    import random
+    import datetime
+    import pandas as pd
+    string_list = ['AAAA', 'BBBBB', 'CCCCCCC', 'DDDDDDDD', 'EEEEEEE']
+    string_list_2 = ['AAAA', 'BBBBB', np.nan]
+    variety_list = ['AAAA', 1, np.nan]
+    datetime_list = [datetime.datetime(2018, 1, 1, 1, 1, 1), datetime.datetime(2022, 2, 2, 2, 2, 2)]
+    true_false_list = [True, False]
+    float_inf_list = [0.11, 999.8, np.inf, -np.inf]
+    large_float_nan_list = [10.1231321321321321 ** 18, np.nan]
+    nrow = 10000
+    r = random.Random(502)
+    df1 = pd.DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['Test'])
+    df1['num'] = range(nrow)
+    df1.loc[8, 'Test2'] = float('nan')
+    df1['Test3'] = df1['Test']
+    df1['really_long_column_name_1'] = df1['Test']
+    df1['really_long_column_name_2'] = df1['Test']
+    df1['Test6'] = "Test"
+    df1['Test7'] = 5
+    df1 = df1.join([pd.DataFrame([r.choice(variety_list) for _ in range(nrow)], columns=['variety_list'])])
+    df1 = df1.join([pd.DataFrame([r.choice(true_false_list) for _ in range(nrow)], columns=['true_false_list'])])
+    df1 = df1.join([pd.DataFrame([r.choice(string_list_2) for _ in range(nrow)], columns=['string_list_2'])])
+    df1 = df1.join([pd.DataFrame([r.choice(datetime_list) for _ in range(nrow)], columns=['date_time'])])
+    df1 = df1.join([pd.DataFrame([r.choice(float_inf_list) for _ in range(nrow)], columns=['float_inf_list'])])
+    df1 = df1.join([pd.DataFrame([r.choice(large_float_nan_list) for _ in range(nrow)], columns=['float_nan_list'])])
+    df1 = df1.join([pd.DataFrame(np.random.rand(nrow, 10), columns=list(map(chr, range(97, 107))))])
+    df1.loc[1, 'a'] = float('nan')
+    df1 = df1.join([pd.DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
+    df1 = df1.join([pd.DataFrame([{'F': [1, 2, 3, 4]}])])
+    df1['super_super_super_unacceptable_long_column_name_that_should_not_happen'] = df1['Test']
 
-    df1 = pd.DataFrame(
-        [
-            [True, "bool"],
-            [1+1j, "complex"],
-            ['test', "string"],
-            [1.11, "float"],
-            [1, "int"],
-            [np.random.rand(3, 3), "Unkown type"],
-            ["Large value", 100],
-            ["áéí", "unicode"]
-        ],
-        index=['a', 'b', nan, nan, nan, 'c', "Test global max", 'd'],
-        columns=[nan, 'Type']
-    )
-    out = test_edit(df1)
-    assert_frame_equal(df1, out)
-
-    result = pd.Series([True, "bool"], index=[nan, 'Type'], name='a')
-    out = test_edit(df1.iloc[0])
-    assert_series_equal(result, out)
-
-    df1 = pd.DataFrame(np.random.rand(100100, 10))
-    out = test_edit(df1)
-    assert_frame_equal(out, df1)
-
-    series = pd.Series(np.arange(10), name=0)
-    out = test_edit(series)
-    assert_series_equal(series, out)
+    _test_wrapper(_test_edit, df1, is_profiling=True)
 
 
 if __name__ == '__main__':
