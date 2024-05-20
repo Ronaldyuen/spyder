@@ -368,6 +368,10 @@ class DataFrameModel(QAbstractTableModel):
         ax = self._axis(axis)
         if not hasattr(ax, 'levels'):
             ax = self._axis_list(axis)
+            # its unclear why this index out of range error would occur,
+            # maybe original bug?
+            if x == len(ax):
+                return ''
             return ax[x]
         else:
             return ax.values[x][level]
