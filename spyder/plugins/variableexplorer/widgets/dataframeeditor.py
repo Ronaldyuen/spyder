@@ -794,14 +794,14 @@ class DataFrameModel(QAbstractTableModel):
         """Get more columns and/or rows."""
         if rows and self.total_rows > self.rows_loaded:
             reminder = self.total_rows - self.rows_loaded
-            items_to_fetch = min(reminder, ROWS_TO_LOAD)
+            items_to_fetch = min(reminder, self.model_extra.ROWS_TO_LOAD)
             self.beginInsertRows(QModelIndex(), self.rows_loaded,
                                  self.rows_loaded + items_to_fetch - 1)
             self.rows_loaded += items_to_fetch
             self.endInsertRows()
         if columns and self.total_cols > self.cols_loaded:
             reminder = self.total_cols - self.cols_loaded
-            items_to_fetch = min(reminder, COLS_TO_LOAD)
+            items_to_fetch = min(reminder, self.model_extra.COLS_TO_LOAD)
             self.beginInsertColumns(QModelIndex(), self.cols_loaded,
                                     self.cols_loaded + items_to_fetch - 1)
             self.cols_loaded += items_to_fetch
@@ -826,6 +826,13 @@ class DataFrameModel(QAbstractTableModel):
     def reset(self):
         self.beginResetModel()
         self.endResetModel()
+
+    # TODO: add rationale behind this?
+    def set_rows_to_load(self, rows_to_load):
+        self.model_extra.ROWS_TO_LOAD = rows_to_load
+
+    def set_cols_to_load(self, cols_to_load):
+        self.model_extra.COLS_TO_LOAD = cols_to_load
 
 
 class DataFrameView(QTableView, SpyderConfigurationAccessor):
@@ -1057,6 +1064,7 @@ class DataFrameHeaderModel(QAbstractTableModel):
 
         # Use paging when the total size, number of rows or number of
         # columns is too large
+        """
         if size > LARGE_SIZE:
             self.rows_loaded = ROWS_TO_LOAD
             self.cols_loaded = COLS_TO_LOAD
@@ -1069,13 +1077,16 @@ class DataFrameHeaderModel(QAbstractTableModel):
                 self.rows_loaded = ROWS_TO_LOAD
             else:
                 self.rows_loaded = self.total_rows
+        """
 
         if self.axis == 0:
             self.total_cols = self.model.shape[1]
             self._shape = (self.model.header_shape[0], self.model.shape[1])
+            self.cols_loaded = self.model.cols_loaded
         else:
             self.total_rows = self.model.shape[0]
             self._shape = (self.model.shape[0], self.model.header_shape[1])
+            self.rows_loaded = self.model.rows_loaded
 
     def rowCount(self, index=None):
         """Get number of rows in the header."""
@@ -1101,14 +1112,14 @@ class DataFrameHeaderModel(QAbstractTableModel):
         """Get more columns or rows (based on axis)."""
         if  self.axis == 1 and self.total_rows > self.rows_loaded:
             reminder = self.total_rows - self.rows_loaded
-            items_to_fetch = min(reminder, ROWS_TO_LOAD)
+            items_to_fetch = min(reminder, self.model.model_extra.ROWS_TO_LOAD)
             self.beginInsertRows(QModelIndex(), self.rows_loaded,
                                  self.rows_loaded + items_to_fetch - 1)
             self.rows_loaded += items_to_fetch
             self.endInsertRows()
         if self.axis == 0 and self.total_cols > self.cols_loaded:
             reminder = self.total_cols - self.cols_loaded
-            items_to_fetch = min(reminder, COLS_TO_LOAD)
+            items_to_fetch = min(reminder, self.model.model_extra.COLS_TO_LOAD)
             self.beginInsertColumns(QModelIndex(), self.cols_loaded,
                                     self.cols_loaded + items_to_fetch - 1)
             self.cols_loaded += items_to_fetch
@@ -1853,7 +1864,7 @@ def test():
     true_false_list = [True, False]
     float_inf_list = [0.11, 999.8, np.inf, -np.inf]
     large_float_nan_list = [10.1231321321321321 ** 18, np.nan]
-    nrow = 10000
+    nrow = 1000000
     r = random.Random(502)
     df1 = pd.DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['Test'])
     df1['num'] = range(nrow)
