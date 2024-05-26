@@ -103,6 +103,17 @@ Notes:
 - This is a cleanup compared to the previous version (feature/dataframeeditor_filter), 
     which was based from master in 2022, and started to have more conflicts
     - There are some logic that is not completely transferred, as a TODO, such as _reset_sort_indicator, resizing optimisations
+    
+Install:
+- There might be issues with running bootstrap.py, some of the 
+    - might need to alternate with --no-install running bootstrap.py
+    - remove qdarkstyle from ./external-deps
+    - add ./external-deps/python-lsp-server to sys.path when in bootstrap.py
+    - remove assert of panas in ./spyder/app/mainwindow.py
+    
+TODO:
+- maybe change default dataframe window size
+     
 
 Main functionalities:
 - Adding Filter box at the columns header, mainly used for filtering rows 
@@ -115,9 +126,8 @@ Main functionalities:
 - A row count on the top-left corner showing the row/nrows of current selection 
 
 
-Careful:
-- keyPressEvent is important and easy to miss 
-- There might be
+Code:
+- keyPressEvent is important and easy to miss  
 
 
 QT API Function dictionary (old):
