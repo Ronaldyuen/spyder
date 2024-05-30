@@ -534,7 +534,7 @@ class DataFrameModel(QAbstractTableModel):
                 exec(exec_text)
             except:
                 QMessageBox.critical(self.dialog, _("Error"), traceback.format_exc())
-                self.model_extra.remove_index_tracker(self.original_df, is_update=False)
+                self.model_extra.remove_index_tracker(self.model_extra.original_df, is_update=False)
                 return
             self.model_extra.filtered_text = f'{df_name}[{query_text}]'
             self.model_extra.remove_index_tracker(self.model_extra.original_df, is_update=False)
