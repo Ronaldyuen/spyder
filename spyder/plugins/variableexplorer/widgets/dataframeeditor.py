@@ -67,6 +67,8 @@ from PyQt5.QtCore import QRect
 from typing import Callable
 import traceback
 import collections
+import re
+import datetime
 
 # Supported Numbers and complex numbers
 REAL_NUMBER_TYPES = (float, int, np.int64, np.int32)
@@ -549,43 +551,66 @@ class DataFrameModel(QAbstractTableModel):
     def _get_query_list(filter_str, column_name):
         """wrap filter_str with df name and column name with special characters handling
 
-        (Assume "|" and "&" not used other than separator)
-        Multiple logical statements within a editing cell (column) could be separated by "|" OR "&" which represent union OR intersection
-        They could not be present at the same time
-        Each statement should START with either the logical operators: > < !=  ==
-        OR the following definitions:
-        ^ : replace by .str.startswith
-        ISNAN: replace by pd.isnull
+        "|" and "&" are used as separator, corresponding to union, and intersection respectively,
+        they could not be present at the same time
 
-        If none of above is detected, will use == by default
+        Each separated logic is checked against these rules:
+        ^, +: string match
+        ISNAN: checks for NaN
 
-        Example of filter_str: 1|2  >5&<10  ^"E"
+        >, <, !=, ==: numeric comparison
+        If none of above is detected, == is used by default
+
+        furthermore, date format is supported which would covert "YYYY-MM-DD" to datetime object
+
+        Example of filter_str:
+            - multiple equality: 1|2
+            - multiple comparison: >5&<10
+            - starts with E: ^"E"
+            - actual datetime comparison: "2022-02-02"
         """
 
         def _get_handled_logic(logic_str, column_name):
             logic_str = logic_str.strip()
-            if logic_str.startswith((">", "<", "!=", "==")):
-                pass
-            elif logic_str.startswith("^"):
-                logic_str = ".str.startswith({})".format(logic_str[1:])
-            elif logic_str.startswith("+"):
-                logic_str = ".str.contains({})".format(logic_str[1:])
-            elif logic_str == "ISNAN":
+            if logic_str == "ISNAN":
                 return f'(pd.isnull({_ORIGINAL_DF_STR}["{column_name}"]))'
             elif logic_str == "!ISNAN":
                 return f'(~pd.isnull({_ORIGINAL_DF_STR}["{column_name}"]))'
-            else:
+            # string
+            if logic_str.startswith("^"):
+                return f'({_ORIGINAL_DF_STR}["{column_name}"].str.startswith({logic_str[1:]})'
+            elif logic_str.startswith("+"):
+                return f'({_ORIGINAL_DF_STR}["{column_name}"].str.contains({logic_str[1:]})'
+            # Other operators
+            content_str = logic_str
+            operator = None
+            for op in ("!=", "==", ">=", "<=", ">", "<"):
+                # first split
+                split_result = logic_str.split(op, 1)
+                if len(split_result) > 1:
+                    # found
+                    content_str = split_result[1]
+                    operator = op
+                    break
+            if operator is None:
                 # default
-                logic_str = "==" + logic_str
-            return f'({_ORIGINAL_DF_STR}["{column_name}"]{logic_str})'
+                operator = "=="
+            # checking for date like string in the content
+            # regex matching with date, must use double quotes
+            content_str = content_str.strip()
+            if re.match(r'["\']\d{4}-\d{2}-\d{2}["\']', content_str):
+                content_str = f'datetime.datetime.strptime({content_str}, "%Y-%m-%d").date()'
+            return f'({_ORIGINAL_DF_STR}["{column_name}"]{operator}{content_str})'
 
         #####
         if filter_str == '':
             return
+        # cannot have multiple logical operator
         assert (not ("|" in filter_str and "&" in filter_str))
         for i in ["|", "&"]:
             if i in filter_str:
                 multiple_logic = [_get_handled_logic(filter_str, column_name) for filter_str in filter_str.split(i)]
+                # combine after parsing them separately
                 return i.join(multiple_logic)
         else:
             return _get_handled_logic(filter_str, column_name)
@@ -1895,6 +1920,7 @@ def test():
     string_list_2 = ['AAAA', 'BBBBB', np.nan]
     variety_list = ['AAAA', 1, np.nan]
     datetime_list = [datetime.datetime(2018, 1, 1, 1, 1, 1), datetime.datetime(2022, 2, 2, 2, 2, 2)]
+    date_list = [dt.date() for dt in datetime_list]
     true_false_list = [True, False]
     float_inf_list = [0.11, 999.8, np.inf, -np.inf]
     large_float_nan_list = [10.1231321321321321 ** 18, np.nan]
@@ -1912,6 +1938,7 @@ def test():
     df1 = df1.join([pd.DataFrame([r.choice(true_false_list) for _ in range(nrow)], columns=['true_false_list'])])
     df1 = df1.join([pd.DataFrame([r.choice(string_list_2) for _ in range(nrow)], columns=['string_list_2'])])
     df1 = df1.join([pd.DataFrame([r.choice(datetime_list) for _ in range(nrow)], columns=['date_time'])])
+    df1 = df1.join([pd.DataFrame([r.choice(date_list) for _ in range(nrow)], columns=['date'])])
     df1 = df1.join([pd.DataFrame([r.choice(float_inf_list) for _ in range(nrow)], columns=['float_inf_list'])])
     df1 = df1.join([pd.DataFrame([r.choice(large_float_nan_list) for _ in range(nrow)], columns=['float_nan_list'])])
     df1 = df1.join([pd.DataFrame(np.random.rand(nrow, 10), columns=list(map(chr, range(97, 107))))])
