@@ -1344,6 +1344,8 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.is_series = False
         self.layout = None
+        # start with maximized window
+        self.setWindowState(Qt.WindowMaximized)
 
     def setup_and_check(self, data, title=''):
         """
@@ -1457,6 +1459,8 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
 
         format = '%' + self.get_conf('dataframe_format')
         self.dataModel.set_format(format)
+
+
 
         return True
 
