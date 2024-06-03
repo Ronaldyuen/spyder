@@ -578,9 +578,9 @@ class DataFrameModel(QAbstractTableModel):
                 return f'(~pd.isnull({_ORIGINAL_DF_STR}["{column_name}"]))'
             # string
             if logic_str.startswith("^"):
-                return f'({_ORIGINAL_DF_STR}["{column_name}"].str.startswith({logic_str[1:]})'
+                return f'({_ORIGINAL_DF_STR}["{column_name}"].str.startswith({logic_str[1:]}))'
             elif logic_str.startswith("+"):
-                return f'({_ORIGINAL_DF_STR}["{column_name}"].str.contains({logic_str[1:]})'
+                return f'({_ORIGINAL_DF_STR}["{column_name}"].str.contains({logic_str[1:]}))'
             # Other operators
             content_str = logic_str
             operator = None
