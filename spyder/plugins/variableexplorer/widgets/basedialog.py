@@ -25,8 +25,8 @@ class BaseDialog(QDialog):
         )
         self.setStyleSheet(css.toString())
 
-    def set_dynamic_width_and_height(self, screen_geometry, width_ratio=0.5,
-                                     height_ratio=0.5):
+    def set_dynamic_width_and_height(self, screen_geometry, width_ratio=0.75,
+                                     height_ratio=0.75):
         """
         Update width and height using an updated screen geometry.
         Use a ratio for the width and height of the dialog.

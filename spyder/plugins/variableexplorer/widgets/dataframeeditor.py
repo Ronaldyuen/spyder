@@ -63,12 +63,13 @@ from spyder.plugins.variableexplorer.widgets.arrayeditor import get_idx_rect
 from spyder.plugins.variableexplorer.widgets.basedialog import BaseDialog
 
 from qtpy.QtWidgets import QHeaderView, QLabel
-from PyQt5.QtCore import QRect
+from PyQt5.QtCore import QRect, QPoint, QByteArray
 from typing import Callable
 import traceback
 import collections
 import re
 import datetime
+from dataclasses import dataclass
 
 # Supported Numbers and complex numbers
 REAL_NUMBER_TYPES = (float, int, np.int64, np.int32)
@@ -111,10 +112,9 @@ Install:
     - might need to alternate with --no-install running bootstrap.py
     - remove qdarkstyle from ./external-deps
     - add ./external-deps/python-lsp-server to sys.path when in bootstrap.py
-    - remove assert of panas in ./spyder/app/mainwindow.py
+    - remove assert of pandas in ./spyder/app/mainwindow.py
     
 TODO:
-- maybe change default dataframe window size
      
 
 Main functionalities:
@@ -129,7 +129,8 @@ Main functionalities:
 
 
 Code:
-- keyPressEvent is important and easy to miss  
+- keyPressEvent is important and easy to miss
+- basedialog.py changed for window size  
 
 
 QT API Function dictionary (old):
@@ -231,6 +232,17 @@ class CustomHeaderViewEditor(CustomHeaderView):
     def clearFilterText(self):
         for index in range(0, len(self._editors)):
             self._editors[index].setText('')
+
+
+@dataclass
+class DataFrameGeometry:
+    geometry: QByteArray = None
+
+    def set(self, geometry: QByteArray):
+        self.geometry = geometry
+
+
+DataFrameGeometry = DataFrameGeometry()
 
 
 ##### Custome Header Done ######
@@ -1344,8 +1356,6 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.is_series = False
         self.layout = None
-        # start with maximized window
-        self.setWindowState(Qt.WindowMaximized)
 
     def setup_and_check(self, data, title=''):
         """
@@ -1463,6 +1473,24 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
 
 
         return True
+
+    """
+        This section (resizeEvent, moveEvent, show) is about storing the previous geometry of the dataframe 
+        and apply to newly opened dataframes, however its slighlty different when applying with multi screen settings  
+    """
+
+    def resizeEvent(self, a0, QResizeEvent=None):
+        DataFrameGeometry.set(self.saveGeometry())
+
+    def moveEvent(self, a0, QMoveEvent=None):  # real signature unknown; restored from __doc__
+        DataFrameGeometry.set(self.saveGeometry())
+
+    def show(self):
+        # storing original first, as .show() (basedialog.py) would change it
+        original = DataFrameGeometry.geometry
+        super().show()
+        if original is not None:
+            self.restoreGeometry(original)
 
     @Slot(QModelIndex, QModelIndex)
     def save_and_close_enable(self, top_left, bottom_right):
