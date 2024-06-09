@@ -644,6 +644,8 @@ class DataFrameModel(QAbstractTableModel):
         else:
             if isinstance(value, COMPLEX_NUMBER_TYPES):
                 color_func = abs
+            elif isinstance(value, REAL_NUMBER_TYPES):
+                color_func = float
             else:
                 color_func = float
                 if self.model_extra.unique_items_col[column] is not None:
@@ -1956,7 +1958,8 @@ def test():
     true_false_list = [True, False]
     float_inf_list = [0.11, 999.8, np.inf, -np.inf]
     large_float_nan_list = [10.1231321321321321 ** 18, np.nan]
-    nrow = 1000000
+    float_small_diff_list = [1.1, 1.2, 1.3, 1.4, 1.5]
+    nrow = 10000
     r = random.Random(502)
     df1 = pd.DataFrame([r.choice(string_list) for _ in range(nrow)], columns=['Test'])
     df1['num'] = range(nrow)
@@ -1973,6 +1976,7 @@ def test():
     df1 = df1.join([pd.DataFrame([r.choice(date_list) for _ in range(nrow)], columns=['date'])])
     df1 = df1.join([pd.DataFrame([r.choice(float_inf_list) for _ in range(nrow)], columns=['float_inf_list'])])
     df1 = df1.join([pd.DataFrame([r.choice(large_float_nan_list) for _ in range(nrow)], columns=['float_nan_list'])])
+    df1 = df1.join([pd.DataFrame([r.choice(float_small_diff_list) for _ in range(nrow)], columns=['float_small_diff_list'])])
     df1 = df1.join([pd.DataFrame(np.random.rand(nrow, 10), columns=list(map(chr, range(97, 107))))])
     df1.loc[1, 'a'] = float('nan')
     df1 = df1.join([pd.DataFrame(np.random.rand(nrow, 5) * 20, columns=['A', 'B', 'C', 'D', 'E'])])
