@@ -550,7 +550,8 @@ class DataFrameModel(QAbstractTableModel):
                 QMessageBox.critical(self.dialog, _("Error"), traceback.format_exc())
                 self.model_extra.remove_index_tracker(self.model_extra.original_df, is_update=False)
                 return
-            self.model_extra.filtered_text = f'{df_name}[{query_text}]'
+            replaced_query_text = query_text.replace("self.model_extra.original_df", df_name)
+            self.model_extra.filtered_text = f'{df_name}[{replaced_query_text}]'
             self.model_extra.remove_index_tracker(self.model_extra.original_df, is_update=False)
             self.model_extra.remove_index_tracker(self.df, is_update=True)
         # reset total rows
