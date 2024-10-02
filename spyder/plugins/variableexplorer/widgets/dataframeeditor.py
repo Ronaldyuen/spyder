@@ -1846,11 +1846,14 @@ class DataFrameEditor(BaseDialog, SpyderConfigurationAccessor):
 
     def _update_header_size(self):
         """Update the column width of the header."""
-        self.table_header.resizeColumnsToContents()
+        # this logic improves from the original one:
+        # as the table header would actually change the width of the table
         column_count = self.table_header.model().columnCount()
+        original_width = [self.dataTable.columnWidth(index) for index in range(0, column_count)]
+        self.table_header.resizeColumnsToContents()
         for index in range(0, column_count):
             if index < column_count:
-                column_width = self.dataTable.columnWidth(index)
+                column_width = original_width[index]
                 header_width = self.table_header.columnWidth(index)
                 if column_width > header_width:
                     self.table_header.setColumnWidth(index, column_width)
