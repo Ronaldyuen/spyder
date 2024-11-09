@@ -624,7 +624,7 @@ class DataFrameModel(QAbstractTableModel):
             if i in filter_str:
                 multiple_logic = [_get_handled_logic(filter_str, column_name) for filter_str in filter_str.split(i)]
                 # combine after parsing them separately
-                return i.join(multiple_logic)
+                return f"({i.join(multiple_logic)})"
         else:
             return _get_handled_logic(filter_str, column_name)
 
